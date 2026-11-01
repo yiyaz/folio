@@ -46,7 +46,15 @@ export function sortableTable(headers: string[], rows: unknown[][], opts: { tota
 
   function render() {
     const q = filter.value.trim().toLowerCase();
-    view = q ? rows.filter((r) => r.some((c) => String(c ?? '').toLowerCase().includes(q))) : rows.slice();
+    view = q
+      ? rows.filter((r) =>
+          r.some((c) =>
+            String(c ?? '')
+              .toLowerCase()
+              .includes(q),
+          ),
+        )
+      : rows.slice();
     if (sortCol >= 0) view.sort((a, b) => cmp(a[sortCol], b[sortCol]) * sortDir);
     tbody.replaceChildren();
     for (const r of view.slice(0, 1000)) {

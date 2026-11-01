@@ -9,7 +9,12 @@ import { loadConfig } from '../src/config.js';
 import { FsStorage } from '../src/storage/fs.js';
 import { SecretBox } from '../src/crypto.js';
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' },
+  });
 
 describe('git sync', () => {
   let env: TestEnv;
@@ -95,15 +100,27 @@ describe('rich embeds', () => {
   const calls: string[] = [];
   const fakeFetch = (async (url: string) => {
     calls.push(url);
-    if (url.endsWith('/repos/acme/api/pulls/42')) return new Response(JSON.stringify({ title: 'Add caching', number: 42, state: 'closed', merged: true, draft: false, user: { login: 'octo' }, labels: [{ name: 'perf' }] }));
+    if (url.endsWith('/repos/acme/api/pulls/42'))
+      return new Response(
+        JSON.stringify({ title: 'Add caching', number: 42, state: 'closed', merged: true, draft: false, user: { login: 'octo' }, labels: [{ name: 'perf' }] }),
+      );
     if (url.includes('/repos/acme/api/contents/src/app.ts')) return new Response(Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n'));
-    if (url.includes('/rest/api/2/issue/OPS-7')) return new Response(JSON.stringify({ fields: { summary: 'Rotate keys', status: { name: 'In Progress' }, assignee: { displayName: 'Bo' }, issuetype: { name: 'Task' } } }));
+    if (url.includes('/rest/api/2/issue/OPS-7'))
+      return new Response(
+        JSON.stringify({ fields: { summary: 'Rotate keys', status: { name: 'In Progress' }, assignee: { displayName: 'Bo' }, issuetype: { name: 'Task' } } }),
+      );
     return new Response('nope', { status: 404 });
   }) as unknown as typeof fetch;
   const fetchEmbed = createEmbedFetcher(cfg, fakeFetch);
 
   it('renders GitHub pull requests', async () => {
-    expect(await fetchEmbed('https://github.com/acme/api/pull/42')).toMatchObject({ kind: 'github-pr', title: 'Add caching', merged: true, labels: ['perf'], repo: 'acme/api' });
+    expect(await fetchEmbed('https://github.com/acme/api/pull/42')).toMatchObject({
+      kind: 'github-pr',
+      title: 'Add caching',
+      merged: true,
+      labels: ['perf'],
+      repo: 'acme/api',
+    });
   });
 
   it('renders code permalinks with line ranges', async () => {

@@ -6,8 +6,7 @@
 docker build -f deploy/docker/Dockerfile -t folio:0.1.0 .
 ```
 
-The image is a multi-stage build on `node:22-alpine`. It runs as the non-root `node` user (uid
-1000) with `git` included for Git sync, and has a `HEALTHCHECK` on `/healthz`. Build arguments:
+The image is a multi-stage build on `node:22-alpine`. It runs as the non-root `node` user (uid 1000) with `git` included for Git sync, and has a `HEALTHCHECK` on `/healthz`. Build arguments:
 
 - `NODE_IMAGE`: base image (e.g. a registry mirror).
 - `RUNTIME_PACKAGES`: OS packages for the runtime, default `git`. Set it to an empty value only if

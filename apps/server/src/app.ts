@@ -28,6 +28,7 @@ import { registerGitRoutes } from './routes/git.js';
 import { registerAiRoutes } from './routes/ai.js';
 import { registerMetrics } from './metrics.js';
 import { migrate } from './migrate.js';
+import { runMaintenance } from './services/maintenance.js';
 
 export interface BuildOptions {
   storage?: Storage;
@@ -46,11 +47,13 @@ declare module 'fastify' {
 export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? { level: cfg.LOG_LEVEL, redact: ['req.headers.authorization', 'req.headers.cookie'] },
-    trustProxy: true,
+    trustProxy: cfg.TRUST_PROXY.trim() || false,
+    // reject absurdly long requests early instead of tying up a worker
+    requestTimeout: 120_000,
     bodyLimit: 2 * 1024 * 1024,
   });
 
-  const db = createPool(cfg);
+  const db = createPool(cfg, app.log);
   if (opts.runMigrations) await migrate(db, (m) => app.log.info(m));
   const bus = new EventBus(db, cfg.DATABASE_URL, app.log);
   await bus.start();
@@ -65,12 +68,20 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
   };
   app.decorate('ctx', ctx);
 
+  const maintenance = setInterval(() => {
+    runMaintenance(db)
+      .then((r) => r && app.log.info({ maintenance: r }, 'maintenance completed'))
+      .catch((err) => app.log.warn({ err }, 'maintenance failed'));
+  }, cfg.MAINTENANCE_INTERVAL_MINUTES * 60_000);
+  maintenance.unref();
+
   let shuttingDown = false;
   app.decorate('startDraining', () => {
     shuttingDown = true;
   });
   app.addHook('onClose', async () => {
     shuttingDown = true;
+    clearInterval(maintenance);
     await bus.stop();
     await db.end();
   });
@@ -99,11 +110,13 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
   await app.register(cookie, { secret: cfg.APP_SECRET });
   await app.register(multipart, { limits: { fileSize: cfg.MAX_UPLOAD_MB * 1024 * 1024 } });
   await app.register(rateLimit, { global: false });
-  await app.register(websocket);
+  await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
 
   app.setErrorHandler((err: any, req, reply) => {
     if (err instanceof ZodError) {
-      return reply.code(400).send({ error: 'validation', message: err.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; '), issues: err.issues });
+      return reply
+        .code(400)
+        .send({ error: 'validation', message: err.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; '), issues: err.issues });
     }
     if (err instanceof HttpError) {
       return reply.code(err.status).send({ error: err.code, message: err.message, details: err.details });
@@ -159,7 +172,8 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
       root: webDist,
       // hashed build assets never change; everything else is revalidated
       cacheControl: false,
-      setHeaders: (res: any, p: string) => res.header('cache-control', p.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache'),
+      setHeaders: (res: any, p: string) =>
+        res.header('cache-control', p.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache'),
     });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/') || req.method !== 'GET') return reply.code(404).send({ error: 'not_found', message: 'Not found' });

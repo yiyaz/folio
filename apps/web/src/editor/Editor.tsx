@@ -11,6 +11,7 @@ import { tags as t } from '@lezer/highlight';
 import { livePreview, refreshDecorations, commentHighlights, setCommentRanges, type LivePreviewHooks, type CommentRange } from './livePreview';
 import { folioCompletions, type CompletionData } from './completions';
 import { formattingKeymap } from './commands';
+import { Frontmatter } from './frontmatter';
 
 export interface EditorHandle {
   view: EditorView | null;
@@ -83,11 +84,23 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         highlightActiveLine(),
         highlightSelectionMatches(),
         EditorView.lineWrapping,
-        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
+        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true, extensions: [Frontmatter] }),
         syntaxHighlighting(markdownHighlight),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        autocompletion({ override: [folioCompletions({ docNames: () => propsRef.current.completionData.docNames(), tags: () => propsRef.current.completionData.tags() })], activateOnTyping: true }),
-        keymap.of([...formattingKeymap, ...closeBracketsKeymap, ...markdownKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
+        autocompletion({
+          override: [folioCompletions({ docNames: () => propsRef.current.completionData.docNames(), tags: () => propsRef.current.completionData.tags() })],
+          activateOnTyping: true,
+        }),
+        keymap.of([
+          ...formattingKeymap,
+          ...closeBracketsKeymap,
+          ...markdownKeymap,
+          ...defaultKeymap,
+          ...searchKeymap,
+          ...historyKeymap,
+          ...completionKeymap,
+          indentWithTab,
+        ]),
         placeholder('Start writing… type / for commands, [[ to link, @ to mention'),
         c.live.of(props.mode === 'live' ? livePreview(hooks) : []),
         c.ro.of([EditorState.readOnly.of(props.readOnly), EditorView.editable.of(!props.readOnly)]),

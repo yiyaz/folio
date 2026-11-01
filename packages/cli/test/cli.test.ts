@@ -7,7 +7,10 @@ import { extractZip, parseArgs, zipMarkdownDir, Api } from '../src/lib.js';
 
 describe('cli helpers', () => {
   it('parses flags', () => {
-    expect(parseArgs(['push', 'docs', '--workspace', 'w1', '--dry', '--folder=f'])).toEqual({ _: ['push', 'docs'], flags: { workspace: 'w1', dry: true, folder: 'f' } });
+    expect(parseArgs(['push', 'docs', '--workspace', 'w1', '--dry', '--folder=f'])).toEqual({
+      _: ['push', 'docs'],
+      flags: { workspace: 'w1', dry: true, folder: 'f' },
+    });
   });
 
   it('zips only markdown files and skips hidden folders', async () => {

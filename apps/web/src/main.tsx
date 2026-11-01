@@ -9,6 +9,7 @@ import { App } from './App';
 import { AuthProvider } from './auth';
 import { ToastProvider } from './components/ui';
 import { DialogProvider } from './components/dialogs';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const qc = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 15_000 } } });
 
@@ -16,13 +17,15 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={qc}>
       <BrowserRouter>
-        <ToastProvider>
-          <DialogProvider>
-            <AuthProvider>
-              <App />
-            </AuthProvider>
-          </DialogProvider>
-        </ToastProvider>
+        <ErrorBoundary>
+          <ToastProvider>
+            <DialogProvider>
+              <AuthProvider>
+                <App />
+              </AuthProvider>
+            </DialogProvider>
+          </ToastProvider>
+        </ErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

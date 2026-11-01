@@ -12,7 +12,9 @@ export async function getSignupSettings(ctx: AppContext): Promise<SignupSettings
   return (
     row?.value ?? {
       mode: ctx.cfg.SIGNUP_MODE,
-      allowedDomains: ctx.cfg.SIGNUP_ALLOWED_DOMAINS.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean),
+      allowedDomains: ctx.cfg.SIGNUP_ALLOWED_DOMAINS.split(',')
+        .map((d) => d.trim().toLowerCase())
+        .filter(Boolean),
     }
   );
 }

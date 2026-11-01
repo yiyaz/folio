@@ -105,7 +105,13 @@ describe('permission matrix', () => {
     const mail = env.mailer.last('newbie@example.com')!;
     const token = /invite=([\w-]+)/.exec(mail.text)![1];
     const c = new Client(env.app);
-    await c.post('/api/auth/signup', { email: 'newbie@example.com', username: 'newbie', displayName: 'Newbie', password: 'password-123456', inviteToken: token });
+    await c.post('/api/auth/signup', {
+      email: 'newbie@example.com',
+      username: 'newbie',
+      displayName: 'Newbie',
+      password: 'password-123456',
+      inviteToken: token,
+    });
     const list = await c.get('/api/workspaces');
     expect(list.data.find((w: any) => w.id === ws)?.role).toBe('commenter');
   });

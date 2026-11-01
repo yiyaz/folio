@@ -52,7 +52,11 @@ export async function registerUserRoutes(app: FastifyInstance) {
   app.get('/api/users/:id/avatar', async (req, reply) => {
     requireUser(req);
     const { id } = req.params as { id: string };
-    const row = await one<{ id: string; avatar_key: string | null }>(ctx.db, 'SELECT id, avatar_key FROM users WHERE id::text = $1 OR lower(username) = lower($1)', [id]);
+    const row = await one<{ id: string; avatar_key: string | null }>(
+      ctx.db,
+      'SELECT id, avatar_key FROM users WHERE id::text = $1 OR lower(username) = lower($1)',
+      [id],
+    );
     if (!row?.avatar_key) throw notFound();
     try {
       const buf = await ctx.storage.get(keys.avatar(row.id));
@@ -80,7 +84,11 @@ export async function registerUserRoutes(app: FastifyInstance) {
   app.get('/api/users/by-username/:username', async (req) => {
     requireUser(req);
     const { username } = req.params as { username: string };
-    const u = await one(ctx.db, `SELECT id, username, display_name AS "displayName", (avatar_key IS NOT NULL) AS "hasAvatar", created_at AS "createdAt" FROM users WHERE lower(username) = lower($1)`, [username]);
+    const u = await one(
+      ctx.db,
+      `SELECT id, username, display_name AS "displayName", (avatar_key IS NOT NULL) AS "hasAvatar", created_at AS "createdAt" FROM users WHERE lower(username) = lower($1)`,
+      [username],
+    );
     if (!u) throw notFound('User not found');
     return u;
   });
@@ -88,7 +96,11 @@ export async function registerUserRoutes(app: FastifyInstance) {
   // ---- personal access tokens (for the REST API and the CLI) ----
   app.get('/api/tokens', async (req) => {
     const u = requireUser(req);
-    return many(ctx.db, `SELECT id, name, prefix, last_used_at AS "lastUsedAt", created_at AS "createdAt" FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC`, [u.id]);
+    return many(
+      ctx.db,
+      `SELECT id, name, prefix, last_used_at AS "lastUsedAt", created_at AS "createdAt" FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC`,
+      [u.id],
+    );
   });
 
   app.post('/api/tokens', async (req, reply) => {
@@ -96,12 +108,11 @@ export async function registerUserRoutes(app: FastifyInstance) {
     if (u.via === 'token') throw badRequest('API tokens cannot create other tokens');
     const { name } = z.object({ name: z.string().trim().min(1).max(80) }).parse(req.body);
     const token = `folio_${randomToken(24)}`;
-    const row = await one(ctx.db, `INSERT INTO api_tokens (user_id, name, token_hash, prefix) VALUES ($1, $2, $3, $4) RETURNING id, name, prefix, created_at AS "createdAt"`, [
-      u.id,
-      name,
-      sha256(token),
-      token.slice(0, 12),
-    ]);
+    const row = await one(
+      ctx.db,
+      `INSERT INTO api_tokens (user_id, name, token_hash, prefix) VALUES ($1, $2, $3, $4) RETURNING id, name, prefix, created_at AS "createdAt"`,
+      [u.id, name, sha256(token), token.slice(0, 12)],
+    );
     return reply.code(201).send({ ...row, token });
   });
 
@@ -121,7 +132,9 @@ export async function registerUserRoutes(app: FastifyInstance) {
   app.put('/api/admin/settings', async (req) => {
     requireAdmin(req);
     const body = z
-      .object({ signup: z.object({ mode: z.enum(['open', 'invite', 'domain', 'closed']), allowedDomains: z.array(z.string().trim().toLowerCase().min(1)).max(50) }) })
+      .object({
+        signup: z.object({ mode: z.enum(['open', 'invite', 'domain', 'closed']), allowedDomains: z.array(z.string().trim().toLowerCase().min(1)).max(50) }),
+      })
       .parse(req.body);
     await setSignupSettings(ctx, body.signup);
     return { signup: body.signup };
@@ -154,7 +167,11 @@ export async function registerUserRoutes(app: FastifyInstance) {
     const token = randomToken();
     await ctx.db.query('INSERT INTO invites (token_hash, email, invited_by) VALUES ($1, $2, $3)', [sha256(token), email, admin.id]);
     const link = `${ctx.cfg.PUBLIC_URL}/signup?invite=${token}&email=${encodeURIComponent(email)}`;
-    await ctx.mailer.send({ to: email, subject: `${admin.displayName} invited you to Folio`, text: `You've been invited to Folio.\n\nCreate your account: ${link}` });
+    await ctx.mailer.send({
+      to: email,
+      subject: `${admin.displayName} invited you to Folio`,
+      text: `You've been invited to Folio.\n\nCreate your account: ${link}`,
+    });
     return reply.code(201).send({ ok: true, link });
   });
 }

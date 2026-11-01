@@ -16,7 +16,10 @@ export function SettingsPage() {
   const toast = useToast();
   const [displayName, setDisplayName] = useState(me?.displayName ?? '');
   const [pw, setPw] = useState({ currentPassword: '', newPassword: '' });
-  const { data: tokens = [], refetch } = useQuery({ queryKey: ['tokens'], queryFn: () => get<{ id: string; name: string; prefix: string; lastUsedAt: string | null; createdAt: string }[]>('/api/tokens') });
+  const { data: tokens = [], refetch } = useQuery({
+    queryKey: ['tokens'],
+    queryFn: () => get<{ id: string; name: string; prefix: string; lastUsedAt: string | null; createdAt: string }[]>('/api/tokens'),
+  });
   const [newToken, setNewToken] = useState<string | null>(null);
   const [tokenName, setTokenName] = useState('');
   if (!me) return null;
@@ -111,7 +114,8 @@ export function SettingsPage() {
           <input type="checkbox" checked={!!me.prefs.lineNumbers} onChange={(e) => savePrefs({ lineNumbers: e.target.checked })} /> Show line numbers
         </label>
         <label className="check">
-          <input type="checkbox" checked={me.prefs.emailNotifications !== false} onChange={(e) => savePrefs({ emailNotifications: e.target.checked })} /> E-mail me about mentions, shares and comments
+          <input type="checkbox" checked={me.prefs.emailNotifications !== false} onChange={(e) => savePrefs({ emailNotifications: e.target.checked })} /> E-mail
+          me about mentions, shares and comments
         </label>
       </section>
 
@@ -132,11 +136,22 @@ export function SettingsPage() {
         >
           <label className="field">
             <span>Current password</span>
-            <input type="password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} autoComplete="current-password" />
+            <input
+              type="password"
+              value={pw.currentPassword}
+              onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })}
+              autoComplete="current-password"
+            />
           </label>
           <label className="field">
             <span>New password</span>
-            <input type="password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} minLength={10} autoComplete="new-password" />
+            <input
+              type="password"
+              value={pw.newPassword}
+              onChange={(e) => setPw({ ...pw, newPassword: e.target.value })}
+              minLength={10}
+              autoComplete="new-password"
+            />
           </label>
           <button className="btn">Change password</button>
         </form>
@@ -168,7 +183,13 @@ export function SettingsPage() {
             }
           }}
         >
-          <input className="grow" placeholder="Token name, e.g. laptop CLI" value={tokenName} onChange={(e) => setTokenName(e.target.value)} aria-label="Token name" />
+          <input
+            className="grow"
+            placeholder="Token name, e.g. laptop CLI"
+            value={tokenName}
+            onChange={(e) => setTokenName(e.target.value)}
+            aria-label="Token name"
+          />
           <button className="btn">Create token</button>
         </form>
         <ul className="doc-list">
@@ -215,10 +236,20 @@ export function WorkspaceSettingsPage() {
   const navigate = useNavigate();
   const isAdmin = can(ws?.role, 'manage');
   const { data: members = [], refetch } = useQuery({ queryKey: ['members', wsId], queryFn: () => get<Member[]>(`/api/workspaces/${wsId}/members`) });
-  const { data: git, refetch: refetchGit } = useQuery({ queryKey: ['git', wsId], queryFn: () => get<GitCfg | null>(`/api/workspaces/${wsId}/git`), enabled: isAdmin });
+  const { data: git, refetch: refetchGit } = useQuery({
+    queryKey: ['git', wsId],
+    queryFn: () => get<GitCfg | null>(`/api/workspaces/${wsId}/git`),
+    enabled: isAdmin,
+  });
   const [name, setName] = useState(ws?.name ?? '');
   const [invite, setInvite] = useState({ user: '', role: 'editor' });
-  const [gitForm, setGitForm] = useState<{ remote: string; branch: string; username: string; subdir: string; token: string }>({ remote: '', branch: 'main', username: 'x-access-token', subdir: '', token: '' });
+  const [gitForm, setGitForm] = useState<{ remote: string; branch: string; username: string; subdir: string; token: string }>({
+    remote: '',
+    branch: 'main',
+    username: 'x-access-token',
+    subdir: '',
+    token: '',
+  });
   const [gitBusy, setGitBusy] = useState(false);
   const [gitLoaded, setGitLoaded] = useState(false);
   if (git && !gitLoaded) {
@@ -272,7 +303,14 @@ export function WorkspaceSettingsPage() {
               });
             }}
           >
-            <input className="grow" placeholder="Username or e-mail (e-mail invites new people)" value={invite.user} onChange={(e) => setInvite({ ...invite, user: e.target.value })} aria-label="Invite member" data-testid="member-input" />
+            <input
+              className="grow"
+              placeholder="Username or e-mail (e-mail invites new people)"
+              value={invite.user}
+              onChange={(e) => setInvite({ ...invite, user: e.target.value })}
+              aria-label="Invite member"
+              data-testid="member-input"
+            />
             <select value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })} aria-label="Member role">
               <option value="viewer">Viewer</option>
               <option value="commenter">Commenter</option>
@@ -288,7 +326,11 @@ export function WorkspaceSettingsPage() {
               <Avatar user={m} /> {m.displayName} <span className="muted">@{m.username}</span>
               <span className="spacer" />
               {isAdmin && m.role !== 'owner' ? (
-                <select value={m.role} onChange={(e) => act(() => patch(`/api/workspaces/${wsId}/members/${m.id}`, { role: e.target.value }))} aria-label={`Role for ${m.username}`}>
+                <select
+                  value={m.role}
+                  onChange={(e) => act(() => patch(`/api/workspaces/${wsId}/members/${m.id}`, { role: e.target.value }))}
+                  aria-label={`Role for ${m.username}`}
+                >
                   <option value="viewer">Viewer</option>
                   <option value="commenter">Commenter</option>
                   <option value="editor">Editor</option>
@@ -329,8 +371,14 @@ export function WorkspaceSettingsPage() {
                   const fd = new FormData();
                   files.forEach((f) => fd.append('files', f, f.name));
                   try {
-                    const r = await api<{ created: number; updated: number; unchanged: number; skipped: string[] }>(`/api/workspaces/${wsId}/import`, { method: 'POST', body: fd });
-                    toast(`Imported: ${r.created} new, ${r.updated} updated, ${r.unchanged} unchanged${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`, 'success');
+                    const r = await api<{ created: number; updated: number; unchanged: number; skipped: string[] }>(`/api/workspaces/${wsId}/import`, {
+                      method: 'POST',
+                      body: fd,
+                    });
+                    toast(
+                      `Imported: ${r.created} new, ${r.updated} updated, ${r.unchanged} unchanged${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`,
+                      'success',
+                    );
                     void qc.invalidateQueries({ queryKey: ['tree', wsId] });
                   } catch (err) {
                     toast(errMsg(err), 'error');
@@ -357,7 +405,11 @@ export function WorkspaceSettingsPage() {
           >
             <label className="field">
               <span>Repository URL (https)</span>
-              <input value={gitForm.remote} onChange={(e) => setGitForm({ ...gitForm, remote: e.target.value })} placeholder="https://github.com/acme/docs.git" />
+              <input
+                value={gitForm.remote}
+                onChange={(e) => setGitForm({ ...gitForm, remote: e.target.value })}
+                placeholder="https://github.com/acme/docs.git"
+              />
             </label>
             <div className="row">
               <label className="field grow">
@@ -437,7 +489,15 @@ export function WorkspaceSettingsPage() {
           <button
             className="btn btn-danger"
             onClick={async () => {
-              if (!(await confirm({ title: 'Delete workspace?', message: `"${ws.name}" and all of its documents will be permanently deleted.`, danger: true, confirmText: 'Delete workspace' }))) return;
+              if (
+                !(await confirm({
+                  title: 'Delete workspace?',
+                  message: `"${ws.name}" and all of its documents will be permanently deleted.`,
+                  danger: true,
+                  confirmText: 'Delete workspace',
+                }))
+              )
+                return;
               await act(() => del(`/api/workspaces/${wsId}`), 'Workspace deleted');
               const other = workspaces.find((w) => w.id !== wsId);
               if (other) setCurrentId(other.id);
@@ -454,10 +514,25 @@ export function WorkspaceSettingsPage() {
 
 export function AdminPage() {
   const toast = useToast();
-  const { data: settings, refetch } = useQuery({ queryKey: ['admin-settings'], queryFn: () => get<{ signup: { mode: string; allowedDomains: string[] } }>('/api/admin/settings') });
+  const { data: settings, refetch } = useQuery({
+    queryKey: ['admin-settings'],
+    queryFn: () => get<{ signup: { mode: string; allowedDomains: string[] } }>('/api/admin/settings'),
+  });
   const { data: users = [], refetch: refetchUsers } = useQuery({
     queryKey: ['admin-users'],
-    queryFn: () => get<{ id: string; email: string; username: string; displayName: string; isAdmin: boolean; emailVerified: boolean; disabledAt: string | null; createdAt: string }[]>('/api/admin/users'),
+    queryFn: () =>
+      get<
+        {
+          id: string;
+          email: string;
+          username: string;
+          displayName: string;
+          isAdmin: boolean;
+          emailVerified: boolean;
+          disabledAt: string | null;
+          createdAt: string;
+        }[]
+      >('/api/admin/users'),
   });
   const [inviteEmail, setInviteEmail] = useState('');
   const [domains, setDomains] = useState<string | null>(null);
@@ -501,7 +576,13 @@ export function AdminPage() {
               );
             }}
           >
-            <input className="grow" value={domainText} onChange={(e) => setDomains(e.target.value)} placeholder="example.com, example.org" aria-label="Allowed domains" />
+            <input
+              className="grow"
+              value={domainText}
+              onChange={(e) => setDomains(e.target.value)}
+              placeholder="example.com, example.org"
+              aria-label="Allowed domains"
+            />
             <button className="btn">Save domains</button>
           </form>
         )}
@@ -518,7 +599,14 @@ export function AdminPage() {
             }
           }}
         >
-          <input className="grow" type="email" placeholder="Invite by e-mail" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} aria-label="Invite e-mail" />
+          <input
+            className="grow"
+            type="email"
+            placeholder="Invite by e-mail"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            aria-label="Invite e-mail"
+          />
           <button className="btn">Send invite</button>
         </form>
       </section>
@@ -541,13 +629,30 @@ export function AdminPage() {
                 </td>
                 <td>{u.email}</td>
                 <td>
-                  {u.isAdmin && <span className="badge">admin</span>} {u.disabledAt ? <span className="badge badge-danger">disabled</span> : !u.emailVerified ? <span className="badge">unverified</span> : null}
+                  {u.isAdmin && <span className="badge">admin</span>}{' '}
+                  {u.disabledAt ? <span className="badge badge-danger">disabled</span> : !u.emailVerified ? <span className="badge">unverified</span> : null}
                 </td>
                 <td className="row">
-                  <button className="btn btn-small" onClick={() => patch(`/api/admin/users/${u.id}`, { isAdmin: !u.isAdmin }).then(() => refetchUsers(), (e) => toast(errMsg(e), 'error'))}>
+                  <button
+                    className="btn btn-small"
+                    onClick={() =>
+                      patch(`/api/admin/users/${u.id}`, { isAdmin: !u.isAdmin }).then(
+                        () => refetchUsers(),
+                        (e) => toast(errMsg(e), 'error'),
+                      )
+                    }
+                  >
                     {u.isAdmin ? 'Revoke admin' : 'Make admin'}
                   </button>
-                  <button className="btn btn-small" onClick={() => patch(`/api/admin/users/${u.id}`, { disabled: !u.disabledAt }).then(() => refetchUsers(), (e) => toast(errMsg(e), 'error'))}>
+                  <button
+                    className="btn btn-small"
+                    onClick={() =>
+                      patch(`/api/admin/users/${u.id}`, { disabled: !u.disabledAt }).then(
+                        () => refetchUsers(),
+                        (e) => toast(errMsg(e), 'error'),
+                      )
+                    }
+                  >
                     {u.disabledAt ? 'Enable' : 'Disable'}
                   </button>
                 </td>

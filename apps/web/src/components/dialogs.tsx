@@ -21,7 +21,8 @@ interface DialogApi {
 
 const Ctx = createContext<DialogApi>({ prompt: async () => null, confirm: async () => false });
 
-type Pending = { kind: 'prompt'; opts: PromptOpts; resolve: (v: string | null) => void } | { kind: 'confirm'; opts: ConfirmOpts; resolve: (v: boolean) => void };
+type Pending =
+  { kind: 'prompt'; opts: PromptOpts; resolve: (v: string | null) => void } | { kind: 'confirm'; opts: ConfirmOpts; resolve: (v: boolean) => void };
 
 export function DialogProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<Pending | null>(null);

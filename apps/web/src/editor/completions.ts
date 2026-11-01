@@ -41,7 +41,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { label: 'mermaid', detail: 'Mermaid diagram', apply: replaceWithBlock('```mermaid\nflowchart LR\n  A --> B\n```', 11) },
   { label: 'graphviz', detail: 'Graphviz (dot) diagram', apply: replaceWithBlock('```dot\ndigraph { A -> B }\n```', 7) },
   { label: 'plantuml', detail: 'PlantUML diagram', apply: replaceWithBlock('```plantuml\nAlice -> Bob: hello\n```', 12) },
-  { label: 'chart', detail: 'Vega-Lite chart', apply: replaceWithBlock('```vega-lite\n{\n  "data": {"values": [{"x": "a", "y": 1}, {"x": "b", "y": 3}]},\n  "mark": "bar",\n  "encoding": {"x": {"field": "x", "type": "nominal"}, "y": {"field": "y", "type": "quantitative"}}\n}\n```', 13) },
+  {
+    label: 'chart',
+    detail: 'Vega-Lite chart',
+    apply: replaceWithBlock(
+      '```vega-lite\n{\n  "data": {"values": [{"x": "a", "y": 1}, {"x": "b", "y": 3}]},\n  "mark": "bar",\n  "encoding": {"x": {"field": "x", "type": "nominal"}, "y": {"field": "y", "type": "quantitative"}}\n}\n```',
+      13,
+    ),
+  },
   { label: 'csv', detail: 'Sortable CSV table', apply: replaceWithBlock('```csv\nname,value\nalpha,1\nbeta,2\n```', 7) },
   { label: 'python', detail: 'Runnable Python (Pyodide)', apply: replaceWithBlock('```python run\nprint("hello from Python")\n```', 14) },
   { label: 'notebook', detail: 'Embed Jupyter notebook attachment', apply: replaceWithBlock('```notebook\nsrc: /api/attachments/<id>\ncells: 1-3\n```', 17) },

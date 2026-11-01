@@ -191,7 +191,10 @@ describe('documents', () => {
   });
 
   describe('attachments', () => {
-    const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4150000000049454e44ae426082', 'hex');
+    const PNG = Buffer.from(
+      '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4150000000049454e44ae426082',
+      'hex',
+    );
 
     it('uploads images and data files, serves them with safe headers', async () => {
       const d = await createDoc(alice, ws, 'With image', '');

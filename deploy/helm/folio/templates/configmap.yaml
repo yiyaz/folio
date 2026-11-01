@@ -9,6 +9,7 @@ data:
   PUBLIC_URL: {{ .Values.publicUrl | quote }}
   COOKIE_SECURE: {{ hasPrefix "https://" .Values.publicUrl | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  TRUST_PROXY: {{ .Values.config.trustProxy | quote }}
   SIGNUP_MODE: {{ .Values.config.signupMode | quote }}
   SIGNUP_ALLOWED_DOMAINS: {{ .Values.config.signupAllowedDomains | quote }}
   REQUIRE_EMAIL_VERIFICATION: {{ .Values.config.requireEmailVerification | quote }}

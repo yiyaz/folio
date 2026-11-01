@@ -71,7 +71,16 @@ const remarkFolio: Plugin<[RenderOptions?], Root> = (opts = {}) => {
 
     // 4. inline syntax inside text nodes
     visit(tree, (node, index, parent) => {
-      if (node.type === 'code' || node.type === 'inlineCode' || node.type === 'link' || node.type === 'html' || node.type === 'yaml' || (node.type as string) === 'math' || (node.type as string) === 'inlineMath') return SKIP;
+      if (
+        node.type === 'code' ||
+        node.type === 'inlineCode' ||
+        node.type === 'link' ||
+        node.type === 'html' ||
+        node.type === 'yaml' ||
+        (node.type as string) === 'math' ||
+        (node.type as string) === 'inlineMath'
+      )
+        return SKIP;
       if (node.type !== 'text' || !parent || index == null) return;
       const value = (node as Text).value;
       type Hit = { index: number; length: number; make: () => Seg };
@@ -98,14 +107,26 @@ const remarkFolio: Plugin<[RenderOptions?], Root> = (opts = {}) => {
         hits.push({
           index: m.index,
           length: m.length,
-          make: () => ({ type: 'link', url: opts.mentionHref?.(m.value) ?? `/u/${m.value}`, children: [{ type: 'text', value: `@${m.value}` }], data: { hProperties: { className: ['mention'], dataUser: m.value } } }) as Link,
+          make: () =>
+            ({
+              type: 'link',
+              url: opts.mentionHref?.(m.value) ?? `/u/${m.value}`,
+              children: [{ type: 'text', value: `@${m.value}` }],
+              data: { hProperties: { className: ['mention'], dataUser: m.value } },
+            }) as Link,
         });
       }
       for (const t of findTags(value)) {
         hits.push({
           index: t.index,
           length: t.length,
-          make: () => ({ type: 'link', url: opts.tagHref?.(t.value) ?? `/tags/${encodeURIComponent(t.value)}`, children: [{ type: 'text', value: `#${t.value}` }], data: { hProperties: { className: ['tag'], dataTag: t.value } } }) as Link,
+          make: () =>
+            ({
+              type: 'link',
+              url: opts.tagHref?.(t.value) ?? `/tags/${encodeURIComponent(t.value)}`,
+              children: [{ type: 'text', value: `#${t.value}` }],
+              data: { hProperties: { className: ['tag'], dataTag: t.value } },
+            }) as Link,
         });
       }
       if (!hits.length) return;

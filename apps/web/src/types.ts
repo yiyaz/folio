@@ -9,7 +9,13 @@ export interface Me {
   isAdmin: boolean;
   emailVerified: boolean;
   hasAvatar: boolean;
-  prefs: { editorMode?: EditorMode; keymap?: 'default' | 'vim' | 'emacs'; theme?: 'system' | 'light' | 'dark'; emailNotifications?: boolean; lineNumbers?: boolean };
+  prefs: {
+    editorMode?: EditorMode;
+    keymap?: 'default' | 'vim' | 'emacs';
+    theme?: 'system' | 'light' | 'dark';
+    emailNotifications?: boolean;
+    lineNumbers?: boolean;
+  };
 }
 
 export interface PublicUser {

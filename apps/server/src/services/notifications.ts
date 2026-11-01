@@ -35,7 +35,9 @@ export async function notify(ctx: AppContext, userId: string, type: Notification
   const user = await one<{ email: string; prefs: Record<string, unknown> }>(ctx.db, 'SELECT email, prefs FROM users WHERE id = $1', [userId]);
   if (!user || user.prefs?.emailNotifications === false) return;
   const subject = SUBJECTS[type](payload);
-  const link = payload.documentId ? `${ctx.cfg.PUBLIC_URL}/d/${payload.documentId}${payload.commentId ? `?comment=${payload.commentId}` : ''}` : ctx.cfg.PUBLIC_URL;
+  const link = payload.documentId
+    ? `${ctx.cfg.PUBLIC_URL}/d/${payload.documentId}${payload.commentId ? `?comment=${payload.commentId}` : ''}`
+    : ctx.cfg.PUBLIC_URL;
   const text = `${subject}\n\n${payload.excerpt ? `> ${payload.excerpt}\n\n` : ''}Open: ${link}\n\nYou can turn off e-mail notifications in your Folio settings.`;
   ctx.mailer.send({ to: user.email, subject, text }).catch((err) => ctx.log.warn({ err }, 'failed to send notification email'));
 }

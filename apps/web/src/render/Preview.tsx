@@ -81,4 +81,3 @@ export function Preview({ source, names = [], publicToken, className, onToggleTa
 
   return <div ref={ref} className={`markdown-body ${className ?? ''}`} onClick={onClick} data-testid="preview" />;
 }
-

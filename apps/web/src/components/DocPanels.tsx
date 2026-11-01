@@ -69,7 +69,21 @@ export function BacklinksPanel({ docId }: { docId: string }) {
   );
 }
 
-export function CommentsPanel({ docId, role, focusId, onFocusAnchor, showResolved, setShowResolved }: { docId: string; role: Role; focusId: string | null; onFocusAnchor: (c: Comment) => void; showResolved: boolean; setShowResolved: (b: boolean) => void }) {
+export function CommentsPanel({
+  docId,
+  role,
+  focusId,
+  onFocusAnchor,
+  showResolved,
+  setShowResolved,
+}: {
+  docId: string;
+  role: Role;
+  focusId: string | null;
+  onFocusAnchor: (c: Comment) => void;
+  showResolved: boolean;
+  setShowResolved: (b: boolean) => void;
+}) {
   const { me } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
@@ -96,7 +110,12 @@ export function CommentsPanel({ docId, role, focusId, onFocusAnchor, showResolve
       </label>
       {!threads.length && <p className="muted small">No comments. {canComment ? 'Select text in the editor and click 💬 Comment.' : ''}</p>}
       {threads.map((t) => (
-        <div key={t.id} className={`thread ${t.resolvedAt ? 'resolved' : ''} ${focusId === t.id ? 'focused' : ''}`} id={`comment-${t.id}`} data-testid="comment-thread">
+        <div
+          key={t.id}
+          className={`thread ${t.resolvedAt ? 'resolved' : ''} ${focusId === t.id ? 'focused' : ''}`}
+          id={`comment-${t.id}`}
+          data-testid="comment-thread"
+        >
           {t.anchorText && (
             <button className="anchor-quote" onClick={() => onFocusAnchor(t)} title="Show in document">
               “{t.anchorText.slice(0, 120)}
@@ -110,7 +129,8 @@ export function CommentsPanel({ docId, role, focusId, onFocusAnchor, showResolve
               mine={c.author?.id === me?.id}
               canModerate={can(role, 'edit')}
               onDelete={async () => {
-                if (await confirm({ title: 'Delete comment?', message: 'This cannot be undone.', danger: true, confirmText: 'Delete' })) await act(() => del(`/api/comments/${c.id}`));
+                if (await confirm({ title: 'Delete comment?', message: 'This cannot be undone.', danger: true, confirmText: 'Delete' }))
+                  await act(() => del(`/api/comments/${c.id}`));
               }}
               onEdit={(body) => act(() => patch(`/api/comments/${c.id}`, { body }))}
             />
@@ -125,7 +145,12 @@ export function CommentsPanel({ docId, role, focusId, onFocusAnchor, showResolve
                   void act(() => post(`/api/documents/${docId}/comments`, { body, parentId: t.id })).then(() => setReply((r) => ({ ...r, [t.id]: '' })));
                 }}
               >
-                <input placeholder="Reply… (@mention someone)" value={reply[t.id] ?? ''} onChange={(e) => setReply((r) => ({ ...r, [t.id]: e.target.value }))} aria-label="Reply" />
+                <input
+                  placeholder="Reply… (@mention someone)"
+                  value={reply[t.id] ?? ''}
+                  onChange={(e) => setReply((r) => ({ ...r, [t.id]: e.target.value }))}
+                  aria-label="Reply"
+                />
               </form>
               <button className="btn btn-small" onClick={() => act(() => patch(`/api/comments/${t.id}`, { resolved: !t.resolvedAt }))}>
                 {t.resolvedAt ? 'Reopen' : 'Resolve'}
@@ -138,7 +163,19 @@ export function CommentsPanel({ docId, role, focusId, onFocusAnchor, showResolve
   );
 }
 
-function CommentItem({ c, mine, canModerate, onDelete, onEdit }: { c: Comment; mine: boolean; canModerate: boolean; onDelete: () => void; onEdit: (body: string) => void }) {
+function CommentItem({
+  c,
+  mine,
+  canModerate,
+  onDelete,
+  onEdit,
+}: {
+  c: Comment;
+  mine: boolean;
+  canModerate: boolean;
+  onDelete: () => void;
+  onEdit: (body: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(c.body);
   return (
@@ -187,7 +224,11 @@ interface Revision {
 export function HistoryPanel({ docId, current, canRestore, onRestored }: { docId: string; current: string; canRestore: boolean; onRestored: () => void }) {
   const { data = [] } = useQuery({ queryKey: ['revisions', docId], queryFn: () => get<Revision[]>(`/api/documents/${docId}/revisions`) });
   const [selected, setSelected] = useState<string | null>(null);
-  const { data: rev } = useQuery({ queryKey: ['revision', docId, selected], queryFn: () => get<{ content: string; version: number }>(`/api/documents/${docId}/revisions/${selected}`), enabled: !!selected });
+  const { data: rev } = useQuery({
+    queryKey: ['revision', docId, selected],
+    queryFn: () => get<{ content: string; version: number }>(`/api/documents/${docId}/revisions/${selected}`),
+    enabled: !!selected,
+  });
   const toast = useToast();
   const { confirm } = useDialogs();
   const parts = useMemo(() => (rev ? diffLines(rev.content, current) : []), [rev, current]);
@@ -214,7 +255,14 @@ export function HistoryPanel({ docId, current, canRestore, onRestored }: { docId
                 className="btn btn-small"
                 data-testid="restore-revision"
                 onClick={async () => {
-                  if (!(await confirm({ title: `Restore version ${rev.version}?`, message: 'The current content will be replaced; it stays available in the history.', confirmText: 'Restore' }))) return;
+                  if (
+                    !(await confirm({
+                      title: `Restore version ${rev.version}?`,
+                      message: 'The current content will be replaced; it stays available in the history.',
+                      confirmText: 'Restore',
+                    }))
+                  )
+                    return;
                   try {
                     await post(`/api/documents/${docId}/revisions/${selected}/restore`);
                     toast(`Restored version ${rev.version}`, 'success');

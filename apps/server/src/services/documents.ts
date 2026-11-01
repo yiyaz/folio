@@ -90,7 +90,9 @@ async function reindex(c: pg.PoolClient, doc: { id: string; workspace_id: string
     await c.query('INSERT INTO doc_tags (document_id, tag) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING', [doc.id, parsed.tags]);
   }
   const mentioned = parsed.mentions.length
-    ? await many<{ id: string; username: string }>(c, 'SELECT id, username FROM users WHERE lower(username) = ANY($1) AND disabled_at IS NULL', [parsed.mentions])
+    ? await many<{ id: string; username: string }>(c, 'SELECT id, username FROM users WHERE lower(username) = ANY($1) AND disabled_at IS NULL', [
+        parsed.mentions,
+      ])
     : [];
   const existing = new Set((await many<{ user_id: string }>(c, 'SELECT user_id FROM mentions WHERE document_id = $1', [doc.id])).map((r) => r.user_id));
   const fresh = mentioned.filter((u) => !existing.has(u.id));
@@ -111,22 +113,48 @@ async function adoptDanglingLinks(c: pg.PoolClient, doc: { id: string; workspace
   );
 }
 
-async function writeRevision(ctx: AppContext, c: pg.PoolClient, doc: DocRow, content: string, version: number, authorId: string) {
+/**
+ * Record the blob a save produced as a revision. Saves by the same author within the coalescing
+ * window replace the latest revision instead of adding one; the blob it pointed to is returned so
+ * the caller can delete it once the transaction has committed.
+ */
+async function recordRevision(c: pg.PoolClient, doc: DocRow, blobKey: string, size: number, version: number, authorId: string): Promise<string | null> {
   const last = await one<{ id: string; author_id: string; created_at: Date; storage_key: string }>(
     c,
     `SELECT id, author_id, created_at, storage_key FROM revisions WHERE document_id = $1 ORDER BY version DESC LIMIT 1`,
     [doc.id],
   );
-  const size = Buffer.byteLength(content);
   if (last && last.author_id === authorId && Date.now() - new Date(last.created_at).getTime() < REVISION_COALESCE_MINUTES * 60_000) {
-    await ctx.storage.put(last.storage_key, content, 'text/markdown; charset=utf-8');
-    await c.query('UPDATE revisions SET version = $2, size = $3 WHERE id = $1', [last.id, version, size]);
-    return;
+    await c.query('UPDATE revisions SET version = $2, size = $3, storage_key = $4 WHERE id = $1', [last.id, version, size, blobKey]);
+    return last.storage_key;
   }
-  const id = randomUUID();
-  const key = `workspaces/${doc.workspace_id}/revisions/${doc.id}/${id}.md`;
+  await c.query('INSERT INTO revisions (document_id, version, storage_key, size, author_id) VALUES ($1, $2, $3, $4, $5)', [
+    doc.id,
+    version,
+    blobKey,
+    size,
+    authorId,
+  ]);
+  return null;
+}
+
+/** Delete blobs that are no longer referenced by any document or revision (best effort). */
+async function collectGarbage(ctx: AppContext, candidates: (string | null | undefined)[]) {
+  for (const key of new Set(candidates.filter((k): k is string => !!k))) {
+    try {
+      const used = await one(ctx.db, 'SELECT 1 FROM documents WHERE storage_key = $1 UNION ALL SELECT 1 FROM revisions WHERE storage_key = $1 LIMIT 1', [key]);
+      if (!used) await ctx.storage.delete(key);
+    } catch (err) {
+      ctx.log.warn({ err, key }, 'failed to delete unreferenced blob');
+    }
+  }
+}
+
+/** Write a new immutable blob for this content. */
+async function putBlob(ctx: AppContext, workspaceId: string, docId: string, content: string): Promise<string> {
+  const key = keys.blob(workspaceId, docId, randomUUID());
   await ctx.storage.put(key, content, 'text/markdown; charset=utf-8');
-  await c.query('INSERT INTO revisions (id, document_id, version, storage_key, size, author_id) VALUES ($1, $2, $3, $4, $5, $6)', [id, doc.id, version, key, size, authorId]);
+  return key;
 }
 
 export interface SaveResult {
@@ -140,7 +168,13 @@ async function afterSave(ctx: AppContext, user: AuthUser, doc: DocRow, fresh: { 
     const access = await documentAccess(ctx.db, u.id, doc.id);
     if (access && can(access.role, 'read')) {
       const idx = excerptSource.toLowerCase().indexOf(`@${u.username.toLowerCase()}`);
-      const excerpt = idx >= 0 ? excerptSource.slice(Math.max(0, idx - 60), idx + 80).replace(/\s+/g, ' ').trim() : undefined;
+      const excerpt =
+        idx >= 0
+          ? excerptSource
+              .slice(Math.max(0, idx - 60), idx + 80)
+              .replace(/\s+/g, ' ')
+              .trim()
+          : undefined;
       await notify(ctx, u.id, 'mention', { actor: actorOf(user), documentId: doc.id, documentName: doc.title ?? doc.name, excerpt });
     } else if (u.id !== user.id) {
       without.push(u);
@@ -157,8 +191,9 @@ export async function createDocument(
 ): Promise<SaveResult> {
   const name = validateName(input.name);
   const id = randomUUID();
-  const key = keys.doc(input.workspaceId, id);
   const parsed = parseDocument(input.content);
+  const size = Buffer.byteLength(input.content);
+  const key = await putBlob(ctx, input.workspaceId, id, input.content);
   const { doc, fresh } = await tx(ctx.db, async (c) => {
     if (input.folderId) {
       const f = await one(c, 'SELECT 1 FROM folders WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL', [input.folderId, input.workspaceId]);
@@ -170,16 +205,18 @@ export async function createDocument(
         c,
         `INSERT INTO documents (id, workspace_id, folder_id, name, title, storage_key, size, search_text, created_by, updated_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9) RETURNING *`,
-        [id, input.workspaceId, input.folderId, name, parsed.title, key, Buffer.byteLength(input.content), parsed.text, user.id],
+        [id, input.workspaceId, input.folderId, name, parsed.title, key, size, parsed.text, user.id],
       ))!;
     } catch (e) {
       uniqueViolation(e, 'A document');
     }
-    await ctx.storage.put(key, input.content, 'text/markdown; charset=utf-8');
-    await writeRevision(ctx, c, doc, input.content, 1, user.id);
+    await recordRevision(c, doc, key, size, 1, user.id);
     const fresh = await reindex(c, doc, parsed);
     await adoptDanglingLinks(c, doc);
     return { doc, fresh };
+  }).catch(async (e) => {
+    await collectGarbage(ctx, [key]);
+    throw e;
   });
   await ctx.bus.publish({ type: 'tree-changed', workspaceId: doc.workspace_id });
   return afterSave(ctx, user, doc, fresh, input.content);
@@ -187,26 +224,41 @@ export async function createDocument(
 
 export async function saveContent(ctx: AppContext, user: AuthUser, docId: string, content: string, baseVersion: number | null): Promise<SaveResult> {
   const parsed = parseDocument(content);
-  const { doc, fresh } = await tx(ctx.db, async (c) => {
+  const size = Buffer.byteLength(content);
+  const meta = await one<{ workspace_id: string }>(ctx.db, 'SELECT workspace_id FROM documents WHERE id = $1', [docId]);
+  if (!meta) throw notFound('Document not found');
+  // write the new content first; the row only points at it once the transaction commits
+  const key = await putBlob(ctx, meta.workspace_id, docId, content);
+  let replaced: (string | null)[] = [];
+  const result = await tx(ctx.db, async (c) => {
     const cur = await one<DocRow>(c, 'SELECT * FROM documents WHERE id = $1 FOR UPDATE', [docId]);
     if (!cur || cur.deleted_at) throw notFound('Document not found');
     if (baseVersion != null && cur.version !== baseVersion) {
       const current = await readContent(ctx, cur);
-      throw conflict('The document was changed by someone else', { version: cur.version, content: current, updatedBy: cur.updated_by, updatedAt: cur.updated_at });
+      throw conflict('The document was changed by someone else', {
+        version: cur.version,
+        content: current,
+        updatedBy: cur.updated_by,
+        updatedAt: cur.updated_at,
+      });
     }
     const version = cur.version + 1;
-    await ctx.storage.put(cur.storage_key, content, 'text/markdown; charset=utf-8');
     const doc = (await one<DocRow>(
       c,
-      `UPDATE documents SET version = $2, title = $3, size = $4, search_text = $5, updated_by = $6, updated_at = now()
+      `UPDATE documents SET version = $2, title = $3, size = $4, search_text = $5, storage_key = $6, updated_by = $7, updated_at = now()
        WHERE id = $1 RETURNING *`,
-      [docId, version, parsed.title, Buffer.byteLength(content), parsed.text, user.id],
+      [docId, version, parsed.title, size, parsed.text, key, user.id],
     ))!;
-    await writeRevision(ctx, c, doc, content, version, user.id);
+    const coalesced = await recordRevision(c, doc, key, size, version, user.id);
+    replaced = [cur.storage_key, coalesced];
     const fresh = await reindex(c, doc, parsed);
     return { doc, fresh };
+  }).catch(async (e) => {
+    await collectGarbage(ctx, [key]);
+    throw e;
   });
-  return afterSave(ctx, user, doc, fresh, content);
+  await collectGarbage(ctx, replaced);
+  return afterSave(ctx, user, result.doc, result.fresh, content);
 }
 
 /**
@@ -224,7 +276,11 @@ export async function updateDocumentMeta(ctx: AppContext, user: AuthUser, docId:
   }
   let doc: DocRow;
   try {
-    doc = (await one<DocRow>(ctx.db, 'UPDATE documents SET name = $2, folder_id = $3, updated_at = now() WHERE id = $1 RETURNING *', [docId, newName, newFolder]))!;
+    doc = (await one<DocRow>(ctx.db, 'UPDATE documents SET name = $2, folder_id = $3, updated_at = now() WHERE id = $1 RETURNING *', [
+      docId,
+      newName,
+      newFolder,
+    ]))!;
   } catch (e) {
     uniqueViolation(e, 'A document');
   }
@@ -265,7 +321,10 @@ export async function restoreDocument(ctx: AppContext, docId: string): Promise<D
   const folderOk = cur.folder_id ? await one(ctx.db, 'SELECT 1 FROM folders WHERE id = $1 AND deleted_at IS NULL', [cur.folder_id]) : true;
   let d: DocRow;
   try {
-    d = (await one<DocRow>(ctx.db, 'UPDATE documents SET deleted_at = NULL, folder_id = $2 WHERE id = $1 RETURNING *', [docId, folderOk ? cur.folder_id : null]))!;
+    d = (await one<DocRow>(ctx.db, 'UPDATE documents SET deleted_at = NULL, folder_id = $2 WHERE id = $1 RETURNING *', [
+      docId,
+      folderOk ? cur.folder_id : null,
+    ]))!;
   } catch (e) {
     uniqueViolation(e, 'A document');
   }
@@ -278,7 +337,9 @@ export async function deleteDocumentPermanently(ctx: AppContext, docId: string) 
   const d = await getDoc(ctx.db, docId);
   const revs = await many<{ storage_key: string }>(ctx.db, 'SELECT storage_key FROM revisions WHERE document_id = $1', [docId]);
   await ctx.db.query('DELETE FROM documents WHERE id = $1', [docId]);
-  await Promise.allSettled([ctx.storage.delete(d.storage_key), ...revs.map((r) => ctx.storage.delete(r.storage_key))]);
+  const blobs = [...new Set([d.storage_key, ...revs.map((r) => r.storage_key)])];
+  const results = await Promise.allSettled(blobs.map((k) => ctx.storage.delete(k)));
+  for (const r of results) if (r.status === 'rejected') ctx.log.warn({ err: r.reason, docId }, 'failed to delete blob of a deleted document');
 }
 
 /** Find a free document name in a folder: "Name", "Name 2", "Name 3", ... */

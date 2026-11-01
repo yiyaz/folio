@@ -55,7 +55,7 @@ export async function exportWorkspaceFiles(ctx: AppContext, workspaceId: string,
   }
   const out: ExportedFile[] = [];
   for (const d of docs) {
-    const dir = d.folder_id ? paths.get(d.folder_id) ?? '' : '';
+    const dir = d.folder_id ? (paths.get(d.folder_id) ?? '') : '';
     const rel = prefix ? dir.slice(prefix.length).replace(/^\//, '') : dir;
     const content = await readContent(ctx, await getDoc(ctx.db, d.id));
     out.push({ path: `${rel ? rel + '/' : ''}${d.name}.md`, content: setFrontmatterField(content, 'id', d.id), docId: d.id });
@@ -88,7 +88,11 @@ async function ensureFolderPath(ctx: AppContext, user: AuthUser, workspaceId: st
     );
     if (existing) parent = existing.id;
     else {
-      const created = await one<{ id: string }>(ctx.db, 'INSERT INTO folders (workspace_id, parent_id, name, created_by) VALUES ($1, $2, $3, $4) RETURNING id', [workspaceId, parent, name.slice(0, 200), user.id]);
+      const created = await one<{ id: string }>(
+        ctx.db,
+        'INSERT INTO folders (workspace_id, parent_id, name, created_by) VALUES ($1, $2, $3, $4) RETURNING id',
+        [workspaceId, parent, name.slice(0, 200), user.id],
+      );
       parent = created!.id;
     }
   }
@@ -126,16 +130,19 @@ export async function importFiles(
     // 1. match by stable id in front matter
     let existing: { id: string; folder_id: string | null; name: string } | null = null;
     if (typeof data.id === 'string' && /^[0-9a-f-]{36}$/i.test(data.id)) {
-      existing = await one(ctx.db, 'SELECT id, folder_id, name FROM documents WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL', [data.id, workspaceId]);
+      existing = await one(ctx.db, 'SELECT id, folder_id, name FROM documents WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL', [
+        data.id,
+        workspaceId,
+      ]);
     }
     const folderId = await ensureFolderPath(ctx, user, workspaceId, opts.folderId ?? null, segs);
     // 2. optionally match by path (git pulls of files that never had an id)
     if (!existing && opts.matchByPath) {
-      existing = await one(ctx.db, 'SELECT id, folder_id, name FROM documents WHERE workspace_id = $1 AND folder_id IS NOT DISTINCT FROM $2 AND lower(name) = lower($3) AND deleted_at IS NULL', [
-        workspaceId,
-        folderId,
-        name,
-      ]);
+      existing = await one(
+        ctx.db,
+        'SELECT id, folder_id, name FROM documents WHERE workspace_id = $1 AND folder_id IS NOT DISTINCT FROM $2 AND lower(name) = lower($3) AND deleted_at IS NULL',
+        [workspaceId, folderId, name],
+      );
     }
     if (existing) {
       const doc = await getDoc(ctx.db, existing.id);

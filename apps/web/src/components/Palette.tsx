@@ -10,7 +10,21 @@ export interface PaletteItem {
 }
 
 /** Generic fuzzy-filter list used by the quick switcher and the command palette. */
-export function Palette({ title, placeholder, items, onClose, onQuery, emptyText }: { title: string; placeholder: string; items: PaletteItem[]; onClose: () => void; onQuery?: (q: string) => void; emptyText?: string }) {
+export function Palette({
+  title,
+  placeholder,
+  items,
+  onClose,
+  onQuery,
+  emptyText,
+}: {
+  title: string;
+  placeholder: string;
+  items: PaletteItem[];
+  onClose: () => void;
+  onQuery?: (q: string) => void;
+  emptyText?: string;
+}) {
   const [q, setQ] = useState('');
   const [idx, setIdx] = useState(0);
   const list = useRef<HTMLUListElement>(null);
@@ -60,7 +74,14 @@ export function Palette({ title, placeholder, items, onClose, onQuery, emptyText
       />
       <ul className="palette-list" ref={list} role="listbox">
         {filtered.map((it, i) => (
-          <li key={it.id} role="option" aria-selected={i === idx} className={cx(i === idx && 'active')} onMouseEnter={() => setIdx(i)} onClick={() => choose(it)}>
+          <li
+            key={it.id}
+            role="option"
+            aria-selected={i === idx}
+            className={cx(i === idx && 'active')}
+            onMouseEnter={() => setIdx(i)}
+            onClick={() => choose(it)}
+          >
             <span>{it.label}</span>
             {it.hint && <span className="muted small">{it.hint}</span>}
           </li>

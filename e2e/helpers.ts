@@ -29,14 +29,16 @@ export async function signupAndVerify(page: Page, name: string, opts: { first?: 
   }
   await expect(page.getByText('Check your inbox')).toBeVisible();
   let link = '';
-  await expect.poll(() => {
-    try {
-      link = /http:\/\/\S+\/verify\?token=\S+/.exec(latestMail(`${name}@example.com`).text)![0];
-      return true;
-    } catch {
-      return false;
-    }
-  }).toBe(true);
+  await expect
+    .poll(() => {
+      try {
+        link = /http:\/\/\S+\/verify\?token=\S+/.exec(latestMail(`${name}@example.com`).text)![0];
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .toBe(true);
   await page.goto(new URL(link).pathname + new URL(link).search);
   await expect(page).toHaveURL('/');
 }

@@ -25,7 +25,12 @@ import type { AuthUser } from '../context.js';
 export async function registerDocumentRoutes(app: FastifyInstance) {
   const ctx = app.ctx;
 
-  async function access(user: AuthUser, docId: string, action: 'read' | 'comment' | 'edit' | 'share', opts: { allowDeleted?: boolean } = {}): Promise<DocAccess> {
+  async function access(
+    user: AuthUser,
+    docId: string,
+    action: 'read' | 'comment' | 'edit' | 'share',
+    opts: { allowDeleted?: boolean } = {},
+  ): Promise<DocAccess> {
     assertUuid(docId);
     const a = await documentAccess(ctx.db, user.id, docId);
     if (!a || (a.deleted && !opts.allowDeleted)) throw notFound('Document not found');
@@ -181,7 +186,10 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         const p = r.positions[0] ?? 0;
         const start = Math.max(0, text.lastIndexOf('\n', p) + 1);
         const endNl = text.indexOf('\n', p);
-        excerpt = text.slice(start, endNl === -1 ? undefined : endNl).trim().slice(0, 240);
+        excerpt = text
+          .slice(start, endNl === -1 ? undefined : endNl)
+          .trim()
+          .slice(0, 240);
       } catch {
         /* missing blob */
       }
@@ -220,7 +228,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const { id, revId } = req.params as { id: string; revId: string };
     await access(u, id, 'read');
     assertUuid(revId);
-    const r = await one<{ storage_key: string; version: number; created_at: Date }>(ctx.db, 'SELECT storage_key, version, created_at FROM revisions WHERE id = $1 AND document_id = $2', [revId, id]);
+    const r = await one<{ storage_key: string; version: number; created_at: Date }>(
+      ctx.db,
+      'SELECT storage_key, version, created_at FROM revisions WHERE id = $1 AND document_id = $2',
+      [revId, id],
+    );
     if (!r) throw notFound('Revision not found');
     return { id: revId, version: r.version, createdAt: r.created_at, content: (await ctx.storage.get(r.storage_key)).toString('utf8') };
   });
@@ -284,9 +296,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       const a = await resourceAccess(u, type, id);
       assertCan(a.role, 'share');
       const body = z.object({ user: z.string().trim().min(1), role: z.enum(['viewer', 'commenter', 'editor']) }).parse(req.body);
-      const target = await one<{ id: string }>(ctx.db, 'SELECT id FROM users WHERE (lower(username) = lower($1) OR lower(email) = lower($1) OR id::text = $1) AND disabled_at IS NULL', [
-        body.user.replace(/^@/, ''),
-      ]);
+      const target = await one<{ id: string }>(
+        ctx.db,
+        'SELECT id FROM users WHERE (lower(username) = lower($1) OR lower(email) = lower($1) OR id::text = $1) AND disabled_at IS NULL',
+        [body.user.replace(/^@/, '')],
+      );
       if (!target) throw notFound('No user with that username or e-mail');
       await ctx.db.query(
         `INSERT INTO permissions (resource_type, resource_id, user_id, role, created_by) VALUES ($1, $2, $3, $4, $5)
@@ -297,7 +311,12 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         type === 'document'
           ? (await one<{ n: string }>(ctx.db, 'SELECT COALESCE(title, name) AS n FROM documents WHERE id = $1', [id]))!.n
           : (await one<{ n: string }>(ctx.db, 'SELECT name AS n FROM folders WHERE id = $1', [id]))!.n;
-      await notify(ctx, target.id, 'share', { actor: actorOf(u), documentId: type === 'document' ? id : undefined, documentName: type === 'document' ? name : `folder "${name}"`, role: body.role });
+      await notify(ctx, target.id, 'share', {
+        actor: actorOf(u),
+        documentId: type === 'document' ? id : undefined,
+        documentName: type === 'document' ? name : `folder "${name}"`,
+        role: body.role,
+      });
       return reply.code(201).send({ ok: true });
     });
 
@@ -370,7 +389,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       .parse(req.body);
     let parentAuthor: string | null = null;
     if (body.parentId) {
-      const p = await one<{ author_id: string; parent_id: string | null }>(ctx.db, 'SELECT author_id, parent_id FROM comments WHERE id = $1 AND document_id = $2', [body.parentId, id]);
+      const p = await one<{ author_id: string; parent_id: string | null }>(
+        ctx.db,
+        'SELECT author_id, parent_id FROM comments WHERE id = $1 AND document_id = $2',
+        [body.parentId, id],
+      );
       if (!p) throw badRequest('parent comment not found');
       if (p.parent_id) throw badRequest('replies cannot be nested');
       parentAuthor = p.author_id;
@@ -378,7 +401,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const c = await one<{ id: string }>(
       ctx.db,
       `INSERT INTO comments (document_id, parent_id, author_id, body, anchor_text, anchor_start, anchor_end) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [id, body.parentId ?? null, u.id, body.body, body.parentId ? null : body.anchorText ?? null, body.anchorStart ?? null, body.anchorEnd ?? null],
+      [id, body.parentId ?? null, u.id, body.body, body.parentId ? null : (body.anchorText ?? null), body.anchorStart ?? null, body.anchorEnd ?? null],
     );
     const d = await getDoc(ctx.db, id);
     const docName = d.title ?? d.name;
@@ -427,7 +450,10 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       await ctx.db.query('UPDATE comments SET body = $2, updated_at = now() WHERE id = $1', [id, body.body]);
     }
     if (body.resolved !== undefined) {
-      await ctx.db.query('UPDATE comments SET resolved_at = CASE WHEN $2 THEN now() ELSE NULL END, resolved_by = CASE WHEN $2 THEN $3::uuid ELSE NULL END WHERE id = $1', [id, body.resolved, u.id]);
+      await ctx.db.query(
+        'UPDATE comments SET resolved_at = CASE WHEN $2 THEN now() ELSE NULL END, resolved_by = CASE WHEN $2 THEN $3::uuid ELSE NULL END WHERE id = $1',
+        [id, body.resolved, u.id],
+      );
     }
     await ctx.bus.publish({ type: 'comments-changed', docId: c.document_id });
     return { ok: true };

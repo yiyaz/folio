@@ -16,7 +16,10 @@ export interface LivePreviewHooks {
 export const refreshDecorations = StateEffect.define<null>();
 
 class ImageWidget extends WidgetType {
-  constructor(readonly src: string, readonly alt: string) {
+  constructor(
+    readonly src: string,
+    readonly alt: string,
+  ) {
     super();
   }
   eq(o: ImageWidget) {
@@ -45,7 +48,10 @@ class BulletWidget extends WidgetType {
 }
 
 class CheckboxWidget extends WidgetType {
-  constructor(readonly checked: boolean, readonly pos: number) {
+  constructor(
+    readonly checked: boolean,
+    readonly pos: number,
+  ) {
     super();
   }
   eq(o: CheckboxWidget) {
@@ -101,7 +107,7 @@ class MathWidget extends WidgetType {
 }
 
 const hide = Decoration.replace({});
-const CODE_NODES = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText', 'HTMLBlock', 'HTMLTag', 'URL', 'Autolink', 'LinkLabel']);
+const CODE_NODES = new Set(['Frontmatter', 'InlineCode', 'FencedCode', 'CodeBlock', 'CodeText', 'HTMLBlock', 'HTMLTag', 'URL', 'Autolink', 'LinkLabel']);
 
 function activeLines(view: EditorView): Set<number> {
   const lines = new Set<number>();
@@ -135,6 +141,15 @@ function build(view: EditorView, hooks: LivePreviewHooks): DecorationSet {
           return;
         }
         switch (name) {
+          case 'Frontmatter': {
+            // document properties: shown as a subdued monospace block, never decorated further
+            for (let p = node.from; p <= node.to;) {
+              const line = doc.lineAt(p);
+              decos.push(Decoration.line({ class: 'cm-lp-frontmatter' }).range(line.from));
+              p = line.to + 1;
+            }
+            return false;
+          }
           case 'HeaderMark': {
             if (node.node.parent?.name.startsWith('ATXHeading') && !isActive(node.from)) {
               const end = Math.min(doc.lineAt(node.from).to, node.to + 1);
@@ -212,7 +227,7 @@ function build(view: EditorView, hooks: LivePreviewHooks): DecorationSet {
             break;
           }
           case 'Blockquote': {
-            for (let p = node.from; p <= node.to; ) {
+            for (let p = node.from; p <= node.to;) {
               const line = doc.lineAt(p);
               decos.push(Decoration.line({ class: 'cm-lp-quote' }).range(line.from));
               p = line.to + 1;
@@ -224,7 +239,7 @@ function build(view: EditorView, hooks: LivePreviewHooks): DecorationSet {
             break;
           case 'FencedCode':
           case 'CodeBlock': {
-            for (let p = node.from; p <= node.to; ) {
+            for (let p = node.from; p <= node.to;) {
               const line = doc.lineAt(p);
               decos.push(Decoration.line({ class: 'cm-lp-codeblock' }).range(line.from));
               p = line.to + 1;
@@ -235,7 +250,7 @@ function build(view: EditorView, hooks: LivePreviewHooks): DecorationSet {
             if (!isActive(node.from)) decos.push(Decoration.replace({ widget: new HrWidget() }).range(node.from, node.to));
             break;
           case 'Table': {
-            for (let p = node.from; p <= node.to; ) {
+            for (let p = node.from; p <= node.to;) {
               const line = doc.lineAt(p);
               decos.push(Decoration.line({ class: 'cm-lp-table' }).range(line.from));
               p = line.to + 1;
@@ -247,7 +262,7 @@ function build(view: EditorView, hooks: LivePreviewHooks): DecorationSet {
     });
 
     // Folio inline syntax: [[links]], @mentions, #tags, $math$
-    for (let pos = from; pos <= to; ) {
+    for (let pos = from; pos <= to;) {
       const line = doc.lineAt(pos);
       pos = line.to + 1;
       const text = line.text;
@@ -283,7 +298,9 @@ function build(view: EditorView, hooks: LivePreviewHooks): DecorationSet {
       }
       for (const m of findMentions(text)) {
         if (inCode(m.index)) continue;
-        decos.push(Decoration.mark({ class: 'cm-lp-mention', attributes: { 'data-mention': m.value } }).range(line.from + m.index, line.from + m.index + m.length));
+        decos.push(
+          Decoration.mark({ class: 'cm-lp-mention', attributes: { 'data-mention': m.value } }).range(line.from + m.index, line.from + m.index + m.length),
+        );
       }
       const isHeading = /^#{1,6}\s/.test(text);
       for (const t of findTags(text)) {
@@ -325,7 +342,14 @@ export function livePreview(hooks: LivePreviewHooks): Extension {
         this.decorations = build(view, hooks);
       }
       update(u: ViewUpdate) {
-        if (u.docChanged || u.viewportChanged || u.selectionSet || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state) || u.transactions.some((t) => t.effects.some((e) => e.is(refreshDecorations)))) {
+        if (
+          u.docChanged ||
+          u.viewportChanged ||
+          u.selectionSet ||
+          u.focusChanged ||
+          syntaxTree(u.startState) !== syntaxTree(u.state) ||
+          u.transactions.some((t) => t.effects.some((e) => e.is(refreshDecorations)))
+        ) {
           this.decorations = build(u.view, hooks);
         }
       }

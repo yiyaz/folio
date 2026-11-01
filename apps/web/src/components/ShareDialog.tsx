@@ -12,7 +12,21 @@ interface Perms {
   canShare: boolean;
 }
 
-export function ShareDialog({ type, id, name, publicToken, onClose, initialUser }: { type: 'document' | 'folder'; id: string; name: string; publicToken?: string | null; onClose: () => void; initialUser?: string }) {
+export function ShareDialog({
+  type,
+  id,
+  name,
+  publicToken,
+  onClose,
+  initialUser,
+}: {
+  type: 'document' | 'folder';
+  id: string;
+  name: string;
+  publicToken?: string | null;
+  onClose: () => void;
+  initialUser?: string;
+}) {
   const base = type === 'document' ? `/api/documents/${id}` : `/api/folders/${id}`;
   const qc = useQueryClient();
   const toast = useToast();
@@ -75,7 +89,13 @@ export function ShareDialog({ type, id, name, publicToken, onClose, initialUser 
       {data?.canShare !== false && (
         <form className="share-form" onSubmit={share}>
           <div className="autocomplete">
-            <input placeholder="Username or e-mail" value={user} onChange={(e) => search(e.target.value)} aria-label="Username or e-mail" data-testid="share-user" />
+            <input
+              placeholder="Username or e-mail"
+              value={user}
+              onChange={(e) => search(e.target.value)}
+              aria-label="Username or e-mail"
+              data-testid="share-user"
+            />
             {suggest.length > 0 && (
               <ul className="autocomplete-list">
                 {suggest.map((u) => (

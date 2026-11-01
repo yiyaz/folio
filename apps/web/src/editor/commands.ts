@@ -46,7 +46,7 @@ function eachSelectedLine(view: EditorView, fn: (text: string, from: number) => 
   const changes: ChangeSpec[] = [];
   const seen = new Set<number>();
   for (const r of state.selection.ranges) {
-    for (let pos = r.from; pos <= r.to; ) {
+    for (let pos = r.from; pos <= r.to;) {
       const line = state.doc.lineAt(pos);
       if (!seen.has(line.number)) {
         seen.add(line.number);
@@ -77,7 +77,11 @@ export function toggleLinePrefix(view: EditorView, prefix: '- ' | '1. ' | '- [ ]
   eachSelectedLine(view, (text, from) => {
     const m = LINE_PREFIX_RE.exec(text)!;
     const existing = m[2] ?? '';
-    const norm = existing.replace(/\d+/, '1').replace(/\[[xX]\]/, '[ ]').replace(/^[*+]/, '-').replace(/^>$/, '> ');
+    const norm = existing
+      .replace(/\d+/, '1')
+      .replace(/\[[xX]\]/, '[ ]')
+      .replace(/^[*+]/, '-')
+      .replace(/^>$/, '> ');
     const start = from + m[1].length;
     if (norm === prefix) return { from: start, to: start + existing.length, insert: '' };
     n++;

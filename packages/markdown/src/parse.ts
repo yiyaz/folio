@@ -8,7 +8,7 @@ import { toString } from 'mdast-util-to-string';
 import GithubSlugger from 'github-slugger';
 import type { Root, Text, Parent } from 'mdast';
 import { splitFrontmatter } from './frontmatter.js';
-import { findWikiLinks, findMentions, findTags, BLOCK_ID_RE } from './syntax.js';
+import { findWikiLinks, findMentions, findTags, BLOCK_ID_RE, WIKILINK_RE } from './syntax.js';
 
 export interface ParsedLink {
   target: string;
@@ -129,5 +129,15 @@ function plainText(tree: Root): string {
     if (node.type === 'yaml') return SKIP;
     if ('value' in node && typeof node.value === 'string' && node.type !== 'html') parts.push(node.value);
   });
-  return parts.join(' ').replace(/\s+/g, ' ').trim();
+  return (
+    parts
+      .join(' ')
+      // readable text for search snippets: [[Doc#Heading|alias]] -> "alias", [[Doc#^id]] -> "Doc"
+      .replace(WIKILINK_RE, (_m, target: string, anchor: string | undefined, alias: string | undefined) =>
+        alias ? alias.trim() : [target.trim(), anchor && !anchor.startsWith('^') ? anchor.trim() : ''].filter(Boolean).join(' '),
+      )
+      .replace(/(^|\s)\^[a-zA-Z0-9-]+(?=\s|$)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }

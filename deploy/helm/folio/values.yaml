@@ -1,0 +1,153 @@
+# -- Folio Helm values. See docs/deployment.md for a walkthrough.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/your-org/folio
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Public URL users reach Folio on (used in e-mails, OIDC redirects, public links)
+publicUrl: https://folio.example.com
+
+config:
+  logLevel: info
+  signupMode: open                 # open | domain | invite | closed (admins can change this in the UI)
+  signupAllowedDomains: ""         # comma separated, for signupMode=domain
+  requireEmailVerification: true
+  maxUploadMb: 25
+  rateLimitAuthPerMin: 10
+  mailFrom: "Folio <no-reply@example.com>"
+  plantumlServer: ""               # e.g. https://www.plantuml.com/plantuml
+  pyodideUrl: https://cdn.jsdelivr.net/pyodide/v0.27.7/full/
+  githubApiUrl: https://api.github.com
+  jiraBaseUrl: ""
+  oidc:
+    issuer: ""                     # enable SSO by setting issuer + clientId (+ secret below)
+    clientId: ""
+    name: Single sign-on
+  otel:
+    endpoint: ""                   # OTLP/HTTP endpoint, enables tracing
+  extraEnv: []                     # [{name: FOO, value: bar}]
+
+# Secrets. Either reference an existing Secret (recommended) or let the chart create one.
+# Keys used: APP_SECRET, DATABASE_URL, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, MAIL_TRANSPORT,
+#            OIDC_CLIENT_SECRET, GITHUB_TOKEN, JIRA_EMAIL, JIRA_TOKEN, ANTHROPIC_API_KEY
+existingSecret: ""
+secrets:
+  appSecret: ""                    # required when existingSecret is empty: 32+ random characters
+  databaseUrl: ""                  # postgres://user:pass@host:5432/folio (ignored when postgresql.enabled)
+  s3AccessKeyId: ""
+  s3SecretAccessKey: ""
+  mailTransport: log               # smtp://user:pass@smtp.example.com:587
+  oidcClientSecret: ""
+  githubToken: ""
+  jiraEmail: ""
+  jiraToken: ""
+  anthropicApiKey: ""              # enables optional AI assist
+
+storage:
+  driver: s3                       # s3 (recommended, scales horizontally) | fs (single replica or RWX volume)
+  s3:
+    bucket: folio
+    region: us-east-1
+    endpoint: ""                   # set for MinIO / non-AWS S3
+    forcePathStyle: true
+  fs:
+    size: 10Gi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]   # use ReadWriteMany to run more than one replica
+
+migrations:
+  # Run database migrations in an initContainer before each pod starts (safe with several
+  # replicas: migrations take a Postgres advisory lock).
+  initContainer: true
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-body-size: 30m
+    # long-lived websockets (presence, live updates)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  host: folio.example.com
+  tls:
+    enabled: true
+    secretName: folio-tls
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { memory: 768Mi }
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+terminationGracePeriodSeconds: 30
+shutdownGraceMs: 5000
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}                  # e.g. IRSA / workload identity for S3 access
+
+metrics:
+  serviceMonitor:
+    enabled: false                 # requires the Prometheus Operator CRDs
+    interval: 30s
+
+networkPolicy:
+  enabled: false
+  ingressNamespace: ingress-nginx
+
+# ---- optional in-cluster dependencies for small installs / evaluation ----
+# For production use a managed Postgres and S3 (or the Bitnami/official charts).
+postgresql:
+  enabled: false
+  image: postgres:16-alpine
+  database: folio
+  username: folio
+  password: ""                     # generated if empty
+  storage: 10Gi
+  storageClass: ""
+
+minio:
+  enabled: false
+  image: minio/minio:latest
+  rootUser: folio
+  rootPassword: ""                 # generated if empty
+  storage: 20Gi
+  storageClass: ""

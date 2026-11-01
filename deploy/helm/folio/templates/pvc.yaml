@@ -1,0 +1,16 @@
+{{- if eq .Values.storage.driver "fs" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "folio.fullname" . }}-data
+  labels: {{- include "folio.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: {{- toYaml .Values.storage.fs.accessModes | nindent 4 }}
+  {{- with .Values.storage.fs.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests: { storage: {{ .Values.storage.fs.size }} }
+{{- end }}

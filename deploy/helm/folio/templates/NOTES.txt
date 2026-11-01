@@ -1,0 +1,15 @@
+Folio has been deployed.
+
+  URL: {{ .Values.publicUrl }}
+
+The first account that signs up becomes the administrator. Open the URL and create it now,
+then adjust who may sign up under Administration.
+
+Check the rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "folio.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "folio.fullname" . }} -c migrate
+{{- if or .Values.postgresql.enabled .Values.minio.enabled }}
+
+NOTE: the bundled PostgreSQL/MinIO are single-instance and meant for evaluation or small teams.
+Use managed services for production.
+{{- end }}

@@ -1,0 +1,161 @@
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { del, get, post } from '../api';
+import type { PublicUser } from '../types';
+import { Avatar, Modal, useToast } from './ui';
+import { errMsg } from '../util';
+
+interface Perms {
+  direct: { id: string; role: string; user: PublicUser }[];
+  inherited: { id: string; role: string; fromFolder: string; user: PublicUser }[];
+  members: { role: string; user: PublicUser }[];
+  canShare: boolean;
+}
+
+export function ShareDialog({ type, id, name, publicToken, onClose, initialUser }: { type: 'document' | 'folder'; id: string; name: string; publicToken?: string | null; onClose: () => void; initialUser?: string }) {
+  const base = type === 'document' ? `/api/documents/${id}` : `/api/folders/${id}`;
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data, refetch } = useQuery({ queryKey: ['perms', type, id], queryFn: () => get<Perms>(`${base}/permissions`) });
+  const [user, setUser] = useState(initialUser ?? '');
+  const [role, setRole] = useState('editor');
+  const [suggest, setSuggest] = useState<PublicUser[]>([]);
+  const [link, setLink] = useState<string | null>(publicToken ? `${location.origin}/p/${publicToken}` : null);
+
+  const search = async (q: string) => {
+    setUser(q);
+    if (q.trim().length < 1) return setSuggest([]);
+    try {
+      setSuggest(await get(`/api/users/search?q=${encodeURIComponent(q)}`));
+    } catch {
+      setSuggest([]);
+    }
+  };
+
+  const share = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user.trim()) return;
+    try {
+      await post(`${base}/permissions`, { user: user.trim(), role });
+      toast(`Shared with ${user}`, 'success');
+      setUser('');
+      setSuggest([]);
+      void refetch();
+    } catch (err) {
+      toast(errMsg(err), 'error');
+    }
+  };
+
+  const remove = async (userId: string) => {
+    try {
+      await del(`${base}/permissions/${userId}`);
+      void refetch();
+    } catch (err) {
+      toast(errMsg(err), 'error');
+    }
+  };
+
+  const togglePublic = async () => {
+    try {
+      if (link) {
+        await del(`${base}/public-link`);
+        setLink(null);
+      } else {
+        const r = await post<{ url: string; token: string }>(`${base}/public-link`);
+        setLink(`${location.origin}/p/${r.token}`);
+      }
+      void qc.invalidateQueries({ queryKey: ['doc', id] });
+    } catch (err) {
+      toast(errMsg(err), 'error');
+    }
+  };
+
+  return (
+    <Modal title={`Share "${name}"`} onClose={onClose} wide>
+      {data?.canShare !== false && (
+        <form className="share-form" onSubmit={share}>
+          <div className="autocomplete">
+            <input placeholder="Username or e-mail" value={user} onChange={(e) => search(e.target.value)} aria-label="Username or e-mail" data-testid="share-user" />
+            {suggest.length > 0 && (
+              <ul className="autocomplete-list">
+                {suggest.map((u) => (
+                  <li key={u.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUser(u.username);
+                        setSuggest([]);
+                      }}
+                    >
+                      <Avatar user={u} size={20} /> {u.displayName} <span className="muted">@{u.username}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role" data-testid="share-role">
+            <option value="viewer">Can view</option>
+            <option value="commenter">Can comment</option>
+            <option value="editor">Can edit</option>
+          </select>
+          <button className="btn btn-primary" type="submit" data-testid="share-submit">
+            Share
+          </button>
+        </form>
+      )}
+
+      <h4>People with access</h4>
+      <ul className="perm-list">
+        {data?.direct.map((p) => (
+          <li key={p.id}>
+            <Avatar user={p.user} /> <span>{p.user.displayName}</span> <span className="muted">@{p.user.username}</span>
+            <span className="spacer" />
+            <span className="badge">{p.role}</span>
+            {data.canShare && (
+              <button className="btn btn-small" onClick={() => remove(p.user.id)}>
+                Remove
+              </button>
+            )}
+          </li>
+        ))}
+        {data?.inherited.map((p) => (
+          <li key={p.id} className="muted">
+            <Avatar user={p.user} /> <span>{p.user.displayName}</span>
+            <span className="spacer" />
+            <span className="badge">{p.role}</span> <span className="small">via 📁 {p.fromFolder}</span>
+          </li>
+        ))}
+        {data?.members.map((m) => (
+          <li key={m.user.id} className="muted">
+            <Avatar user={m.user} /> <span>{m.user.displayName}</span>
+            <span className="spacer" />
+            <span className="badge">{m.role}</span> <span className="small">workspace member</span>
+          </li>
+        ))}
+      </ul>
+
+      {type === 'document' && data?.canShare && (
+        <div className="public-link">
+          <h4>Public link</h4>
+          <p className="muted small">Anyone with the link can read this document without signing in.</p>
+          {link ? (
+            <div className="row">
+              <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Public link" data-testid="public-link" />
+              <button className="btn" onClick={() => navigator.clipboard?.writeText(link).then(() => toast('Link copied', 'success'))}>
+                Copy
+              </button>
+              <button className="btn btn-danger" onClick={togglePublic}>
+                Disable
+              </button>
+            </div>
+          ) : (
+            <button className="btn" onClick={togglePublic} data-testid="enable-public-link">
+              Create public link
+            </button>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}

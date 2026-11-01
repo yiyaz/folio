@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "folio.fullname" . }}-config
+  labels: {{- include "folio.labels" . | nindent 4 }}
+data:
+  NODE_ENV: production
+  PORT: "3000"
+  PUBLIC_URL: {{ .Values.publicUrl | quote }}
+  COOKIE_SECURE: {{ hasPrefix "https://" .Values.publicUrl | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  SIGNUP_MODE: {{ .Values.config.signupMode | quote }}
+  SIGNUP_ALLOWED_DOMAINS: {{ .Values.config.signupAllowedDomains | quote }}
+  REQUIRE_EMAIL_VERIFICATION: {{ .Values.config.requireEmailVerification | quote }}
+  MAX_UPLOAD_MB: {{ .Values.config.maxUploadMb | quote }}
+  RATE_LIMIT_AUTH_PER_MIN: {{ .Values.config.rateLimitAuthPerMin | quote }}
+  MAIL_FROM: {{ .Values.config.mailFrom | quote }}
+  PLANTUML_SERVER: {{ .Values.config.plantumlServer | quote }}
+  PYODIDE_URL: {{ .Values.config.pyodideUrl | quote }}
+  GITHUB_API_URL: {{ .Values.config.githubApiUrl | quote }}
+  JIRA_BASE_URL: {{ .Values.config.jiraBaseUrl | quote }}
+  OIDC_ISSUER: {{ .Values.config.oidc.issuer | quote }}
+  OIDC_CLIENT_ID: {{ .Values.config.oidc.clientId | quote }}
+  OIDC_NAME: {{ .Values.config.oidc.name | quote }}
+  STORAGE_DRIVER: {{ .Values.storage.driver | quote }}
+  {{- if eq .Values.storage.driver "s3" }}
+  S3_BUCKET: {{ .Values.storage.s3.bucket | quote }}
+  S3_REGION: {{ .Values.storage.s3.region | quote }}
+  S3_ENDPOINT: {{ ternary (printf "http://%s-minio:9000" (include "folio.fullname" .)) .Values.storage.s3.endpoint .Values.minio.enabled | quote }}
+  S3_FORCE_PATH_STYLE: {{ .Values.storage.s3.forcePathStyle | quote }}
+  {{- else }}
+  STORAGE_FS_ROOT: /data/storage
+  {{- end }}
+  MIGRATE_ON_START: {{ ternary "false" "true" .Values.migrations.initContainer | quote }}
+  SHUTDOWN_GRACE_MS: {{ .Values.shutdownGraceMs | quote }}
+  {{- with .Values.config.otel.endpoint }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ . | quote }}
+  OTEL_SERVICE_NAME: {{ include "folio.fullname" $ | quote }}
+  {{- end }}

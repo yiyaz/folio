@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+.git
+.data
+.mail
+test-results
+playwright-report
+coverage
+deploy/helm
+*.log
+.env

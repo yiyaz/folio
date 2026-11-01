@@ -1,0 +1,18 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "folio.fullname" . }}
+  labels: {{- include "folio.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "folio.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }} }
+        - podSelector: {}
+      ports:
+        - { port: 3000, protocol: TCP }
+{{- end }}

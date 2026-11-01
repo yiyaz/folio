@@ -1,0 +1,54 @@
+# Local development / single-host deployment.
+#   docker compose up -d            # Postgres, MinIO, Mailpit and Folio on http://localhost:3000
+#   docker compose up -d db minio mailpit && pnpm dev   # run only the dependencies, app from source
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: folio
+      POSTGRES_PASSWORD: folio
+      POSTGRES_DB: folio
+    ports: ['5432:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U folio']
+      interval: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: folio
+      MINIO_ROOT_PASSWORD: folio-minio-secret
+    ports: ['9000:9000', '9001:9001']
+    volumes: [miniodata:/data]
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ['8025:8025', '1025:1025'] # web UI on http://localhost:8025
+
+  app:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+    image: folio:local
+    depends_on:
+      db: { condition: service_healthy }
+      minio: { condition: service_started }
+    ports: ['3000:3000']
+    environment:
+      DATABASE_URL: postgres://folio:folio@db:5432/folio
+      APP_SECRET: change-me-to-a-long-random-string-please
+      PUBLIC_URL: http://localhost:3000
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: folio
+      S3_ACCESS_KEY_ID: folio
+      S3_SECRET_ACCESS_KEY: folio-minio-secret
+      MAIL_TRANSPORT: smtp://mailpit:1025
+      REQUIRE_EMAIL_VERIFICATION: 'true'
+
+volumes:
+  pgdata:
+  miniodata:

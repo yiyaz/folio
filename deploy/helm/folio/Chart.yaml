@@ -1,0 +1,7 @@
+apiVersion: v2
+name: folio
+description: Folio - collaborative plain-Markdown document editor
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [markdown, wiki, editor, documentation]

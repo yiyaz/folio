@@ -11,7 +11,9 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,
-  retries: process.env.CI ? 1 : 0,
+  // the suite is serial and stateful (one database): a retry would restart from sign-up
+  // against existing users and fail for the wrong reason, so failures must be fixed, not retried
+  retries: 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://localhost:${PORT}`,

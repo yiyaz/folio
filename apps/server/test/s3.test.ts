@@ -45,7 +45,13 @@ describe('S3 storage driver', () => {
     let env: TestEnv | null = null;
     beforeAll(async () => {
       if (!endpoint) return;
-      env = await createTestEnv({ STORAGE_DRIVER: 's3', S3_ENDPOINT: endpoint, S3_BUCKET: `folio-app-${Date.now()}`, S3_ACCESS_KEY_ID: 'x', S3_SECRET_ACCESS_KEY: 'y' });
+      env = await createTestEnv({
+        STORAGE_DRIVER: 's3',
+        S3_ENDPOINT: endpoint,
+        S3_BUCKET: `folio-app-${Date.now()}`,
+        S3_ACCESS_KEY_ID: 'x',
+        S3_SECRET_ACCESS_KEY: 'y',
+      });
     });
     afterAll(async () => {
       await env?.close();

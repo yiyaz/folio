@@ -33,7 +33,15 @@ const schema = z.object({
   SIGNUP_ALLOWED_DOMAINS: z.string().default(''),
   REQUIRE_EMAIL_VERIFICATION: bool(true),
   SESSION_TTL_DAYS: z.coerce.number().default(30),
-  COOKIE_SECURE: bool(false),
+  /** Defaults to true when PUBLIC_URL is https. */
+  COOKIE_SECURE: z.string().optional(),
+  /**
+   * Reverse proxies whose X-Forwarded-For header is trusted for the client IP (used for rate
+   * limiting and logs): comma-separated addresses/CIDRs or the keywords loopback, linklocal,
+   * uniquelocal. Empty = trust nobody; otherwise clients could spoof their IP.
+   */
+  TRUST_PROXY: z.string().default(''),
+  MAINTENANCE_INTERVAL_MINUTES: z.coerce.number().min(1).default(60),
 
   RATE_LIMIT_AUTH_PER_MIN: z.coerce.number().default(10),
   MAX_UPLOAD_MB: z.coerce.number().default(25),
@@ -60,12 +68,24 @@ const schema = z.object({
   AI_MODEL: z.string().default('claude-opus-5-5'),
 });
 
-export type Config = z.infer<typeof schema>;
+export type Config = Omit<z.infer<typeof schema>, 'COOKIE_SECURE'> & { COOKIE_SECURE: boolean };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
-  const cfg = schema.parse(env);
-  if (cfg.NODE_ENV === 'production' && cfg.APP_SECRET.startsWith('dev-insecure')) {
-    throw new Error('APP_SECRET must be set in production');
+  const parsed = schema.parse(env);
+  const cookieSecure =
+    parsed.COOKIE_SECURE == null || parsed.COOKIE_SECURE === ''
+      ? parsed.PUBLIC_URL.startsWith('https://')
+      : ['1', 'true', 'yes', 'on'].includes(parsed.COOKIE_SECURE.toLowerCase());
+  const cfg: Config = { ...parsed, COOKIE_SECURE: cookieSecure };
+  if (cfg.NODE_ENV === 'production') {
+    if (cfg.APP_SECRET.startsWith('dev-insecure') || cfg.APP_SECRET.length < 32)
+      throw new Error('APP_SECRET must be set to at least 32 random characters in production');
+    if (cfg.PUBLIC_URL.startsWith('https://') && !cfg.COOKIE_SECURE) throw new Error('COOKIE_SECURE must not be disabled when PUBLIC_URL is https');
+  }
+  try {
+    new URL(cfg.PUBLIC_URL);
+  } catch {
+    throw new Error(`PUBLIC_URL is not a valid URL: ${cfg.PUBLIC_URL}`);
   }
   return cfg;
 }

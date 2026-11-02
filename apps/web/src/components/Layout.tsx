@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { ErrorBoundary } from './ErrorBoundary';
 import { useQueryClient } from '@tanstack/react-query';
 import { post, patch } from '../api';
 import { useAuth } from '../auth';
@@ -29,6 +30,7 @@ export function Layout() {
   const { data: tree } = useTree(current?.id);
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const { prompt } = useDialogs();
   const [palette, setPalette] = useState<'switcher' | 'commands' | null>(null);
@@ -151,7 +153,12 @@ export function Layout() {
             </Link>
           </div>
           <div className="ws-select">
-            <select value={current?.id ?? ''} onChange={(e) => (e.target.value === '__new' ? createWorkspace() : setCurrentId(e.target.value))} aria-label="Workspace" data-testid="workspace-select">
+            <select
+              value={current?.id ?? ''}
+              onChange={(e) => (e.target.value === '__new' ? createWorkspace() : setCurrentId(e.target.value))}
+              aria-label="Workspace"
+              data-testid="workspace-select"
+            >
               {workspaces.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
@@ -175,7 +182,9 @@ export function Layout() {
               ＋ New from template
             </button>
           )}
-          {current && tree && <FileTree workspaceId={current.id} tree={tree} canEdit={canEdit} onShareFolder={setShareFolder} onNewFromTemplate={(f) => setTemplateFolder(f)} />}
+          {current && tree && (
+            <FileTree workspaceId={current.id} tree={tree} canEdit={canEdit} onShareFolder={setShareFolder} onNewFromTemplate={(f) => setTemplateFolder(f)} />
+          )}
         </aside>
         <div className="main">
           <header className="topbar">
@@ -221,14 +230,26 @@ export function Layout() {
             </Menu>
           </header>
           <main className="content">
-            <Outlet />
+            <ErrorBoundary resetKey={location.pathname}>
+              <Outlet />
+            </ErrorBoundary>
           </main>
         </div>
       </div>
-      {palette === 'switcher' && <Palette title="Open document" placeholder="Type a document name…" items={switcherItems} onClose={() => setPalette(null)} emptyText="No documents match" />}
+      {palette === 'switcher' && (
+        <Palette
+          title="Open document"
+          placeholder="Type a document name…"
+          items={switcherItems}
+          onClose={() => setPalette(null)}
+          emptyText="No documents match"
+        />
+      )}
       {palette === 'commands' && <Palette title="Commands" placeholder="Type a command…" items={commandItems} onClose={() => setPalette(null)} />}
       {shareFolder && <ShareDialog type="folder" id={shareFolder.id} name={shareFolder.name} onClose={() => setShareFolder(null)} />}
-      {templateFolder !== undefined && current && <TemplatePicker workspaceId={current.id} folderId={templateFolder} onClose={() => setTemplateFolder(undefined)} />}
+      {templateFolder !== undefined && current && (
+        <TemplatePicker workspaceId={current.id} folderId={templateFolder} onClose={() => setTemplateFolder(undefined)} />
+      )}
     </CommandsContext.Provider>
   );
 }

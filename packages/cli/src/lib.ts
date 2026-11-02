@@ -32,7 +32,10 @@ export async function saveConfig(cfg: CliConfig) {
 }
 
 export class Api {
-  constructor(private cfg: CliConfig, private fetchImpl: typeof fetch = fetch) {}
+  constructor(
+    private cfg: CliConfig,
+    private fetchImpl: typeof fetch = fetch,
+  ) {}
 
   async request(method: string, p: string, body?: string | FormData, headers: Record<string, string> = {}): Promise<Response> {
     const res = await this.fetchImpl(`${this.cfg.url}${p}`, { method, body, headers: { authorization: `Bearer ${this.cfg.token}`, ...headers } });
@@ -49,7 +52,12 @@ export class Api {
   }
 
   async json<T = any>(method: string, p: string, body?: unknown): Promise<T> {
-    const res = await this.request(method, p, body === undefined ? undefined : JSON.stringify(body), body === undefined ? {} : { 'content-type': 'application/json' });
+    const res = await this.request(
+      method,
+      p,
+      body === undefined ? undefined : JSON.stringify(body),
+      body === undefined ? {} : { 'content-type': 'application/json' },
+    );
     return (await res.json()) as T;
   }
 }

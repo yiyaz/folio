@@ -68,7 +68,9 @@ export async function main(argv: string[]) {
       const q = typeof flags.folder === 'string' ? `?folderId=${flags.folder}` : '';
       const res = await api.request('POST', `/api/workspaces/${ws}/import${q}`, form);
       const r = (await res.json()) as { created: number; updated: number; unchanged: number; skipped: string[] };
-      return console.log(`Pushed ${files.length} file(s): ${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`);
+      return console.log(
+        `Pushed ${files.length} file(s): ${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`,
+      );
     }
     case 'search': {
       const q = args.join(' ');
@@ -90,7 +92,12 @@ export async function main(argv: string[]) {
       const name = nameParts.join(' ');
       if (!ws || !name) throw new Error('usage: folio new <workspace-id> <name> [--file path]');
       const content = typeof flags.file === 'string' ? await fs.readFile(flags.file, 'utf8') : await readStdin();
-      const d = await api.json('POST', '/api/documents', { workspaceId: ws, name, content: content || `# ${name}\n`, folderId: typeof flags.folder === 'string' ? flags.folder : null });
+      const d = await api.json('POST', '/api/documents', {
+        workspaceId: ws,
+        name,
+        content: content || `# ${name}\n`,
+        folderId: typeof flags.folder === 'string' ? flags.folder : null,
+      });
       return console.log(`${d.id}\t${d.name}`);
     }
     default:

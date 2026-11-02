@@ -23,7 +23,11 @@ export class EventBus {
   private listener: pg.Client | null = null;
   readonly replicaId = randomUUID();
 
-  constructor(private pool: pg.Pool, private connectionString: string, private log: { warn: (o: object, m: string) => void }) {}
+  constructor(
+    private pool: pg.Pool,
+    private connectionString: string,
+    private log: { warn: (o: object, m: string) => void },
+  ) {}
 
   async start() {
     const client = new pg.Client({ connectionString: this.connectionString });
@@ -77,8 +81,11 @@ interface Conn {
 }
 
 export async function registerRealtime(app: FastifyInstance) {
-  const { db, bus } = app.ctx;
+  const { db, bus, cfg } = app.ctx;
   const conns = new Map<string, Conn>();
+  const allowedOrigin = new URL(cfg.PUBLIC_URL).origin;
+  // the Vite dev server proxies the API from another port
+  const extraOrigins = new Set(cfg.NODE_ENV === 'development' ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : []);
 
   const send = (c: Conn, msg: unknown) => {
     if (c.socket.readyState === 1) c.socket.send(JSON.stringify(msg));
@@ -139,6 +146,13 @@ export async function registerRealtime(app: FastifyInstance) {
   });
 
   app.get('/api/ws', { websocket: true }, (socket, req) => {
+    // Browsers always send Origin on WebSocket handshakes; reject other sites (cross-site
+    // WebSocket hijacking). Non-browser clients (CLI, tests) send none and authenticate normally.
+    const origin = req.headers.origin;
+    if (origin && origin !== allowedOrigin && !extraOrigins.has(origin)) {
+      socket.close(4403, 'origin not allowed');
+      return;
+    }
     if (!req.user) {
       socket.close(4401, 'unauthorized');
       return;

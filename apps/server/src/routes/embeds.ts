@@ -4,14 +4,46 @@ import { badRequest } from '../errors.js';
 import type { Config } from '../config.js';
 
 export type Embed =
-  | { kind: 'github-pr' | 'github-issue'; url: string; title: string; number: number; state: string; repo: string; author: string; labels: string[]; merged?: boolean; draft?: boolean }
+  | {
+      kind: 'github-pr' | 'github-issue';
+      url: string;
+      title: string;
+      number: number;
+      state: string;
+      repo: string;
+      author: string;
+      labels: string[];
+      merged?: boolean;
+      draft?: boolean;
+    }
   | { kind: 'github-code'; url: string; repo: string; path: string; ref: string; startLine: number; endLine: number; language: string; code: string }
   | { kind: 'jira'; url: string; key: string; title: string; status: string; assignee: string | null; type: string };
 
 const GH_ISSUE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/(pull|issues)\/(\d+)\/?(?:[#?].*)?$/;
 const GH_BLOB = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/blob\/([^/]+)\/([^#?]+)(?:\?[^#]*)?(?:#L(\d+)(?:-L(\d+))?)?$/;
 
-const EXT_LANG: Record<string, string> = { ts: 'typescript', tsx: 'typescript', js: 'javascript', py: 'python', go: 'go', rs: 'rust', java: 'java', rb: 'ruby', sql: 'sql', yml: 'yaml', yaml: 'yaml', sh: 'bash', md: 'markdown', json: 'json', kt: 'kotlin', cs: 'csharp', cpp: 'cpp', c: 'c', scala: 'scala', r: 'r' };
+const EXT_LANG: Record<string, string> = {
+  ts: 'typescript',
+  tsx: 'typescript',
+  js: 'javascript',
+  py: 'python',
+  go: 'go',
+  rs: 'rust',
+  java: 'java',
+  rb: 'ruby',
+  sql: 'sql',
+  yml: 'yaml',
+  yaml: 'yaml',
+  sh: 'bash',
+  md: 'markdown',
+  json: 'json',
+  kt: 'kotlin',
+  cs: 'csharp',
+  cpp: 'cpp',
+  c: 'c',
+  scala: 'scala',
+  r: 'r',
+};
 
 /** Patterns the client may turn into rich embeds; mirrors what fetchEmbed supports. */
 export function embedPatterns(cfg: Config): string[] {
@@ -22,7 +54,10 @@ export function embedPatterns(cfg: Config): string[] {
 
 class TTLCache<V> {
   private m = new Map<string, { v: V; exp: number }>();
-  constructor(private ttl: number, private max = 500) {}
+  constructor(
+    private ttl: number,
+    private max = 500,
+  ) {}
   get(k: string) {
     const e = this.m.get(k);
     if (!e || e.exp < Date.now()) return undefined;
@@ -87,14 +122,27 @@ export function createEmbedFetcher(cfg: Config, fetchImpl: typeof fetch = fetch)
       } else if (cfg.JIRA_BASE_URL && url.startsWith(`${cfg.JIRA_BASE_URL}/browse/`)) {
         const key = url.split('/browse/')[1].replace(/\/$/, '');
         if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key)) return null;
-        const auth = cfg.JIRA_EMAIL && cfg.JIRA_TOKEN ? `Basic ${Buffer.from(`${cfg.JIRA_EMAIL}:${cfg.JIRA_TOKEN}`).toString('base64')}` : cfg.JIRA_TOKEN ? `Bearer ${cfg.JIRA_TOKEN}` : undefined;
+        const auth =
+          cfg.JIRA_EMAIL && cfg.JIRA_TOKEN
+            ? `Basic ${Buffer.from(`${cfg.JIRA_EMAIL}:${cfg.JIRA_TOKEN}`).toString('base64')}`
+            : cfg.JIRA_TOKEN
+              ? `Bearer ${cfg.JIRA_TOKEN}`
+              : undefined;
         const r = await fetchImpl(`${cfg.JIRA_BASE_URL}/rest/api/2/issue/${key}?fields=summary,status,assignee,issuetype`, {
           headers: { accept: 'application/json', ...(auth ? { authorization: auth } : {}) },
           signal: AbortSignal.timeout(5000),
         });
         if (!r.ok) throw new Error(`jira ${r.status}`);
         const data: any = await r.json();
-        out = { kind: 'jira', url, key, title: data.fields?.summary ?? key, status: data.fields?.status?.name ?? '', assignee: data.fields?.assignee?.displayName ?? null, type: data.fields?.issuetype?.name ?? '' };
+        out = {
+          kind: 'jira',
+          url,
+          key,
+          title: data.fields?.summary ?? key,
+          status: data.fields?.status?.name ?? '',
+          assignee: data.fields?.assignee?.displayName ?? null,
+          type: data.fields?.issuetype?.name ?? '',
+        };
       }
     } catch {
       out = null;

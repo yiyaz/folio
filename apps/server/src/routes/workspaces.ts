@@ -81,7 +81,11 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const role = await wsRole(u.id, id);
     if (role) {
-      return many(ctx.db, `SELECT id, name, COALESCE(title, name) AS title FROM documents WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY lower(name)`, [id]);
+      return many(
+        ctx.db,
+        `SELECT id, name, COALESCE(title, name) AS title FROM documents WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY lower(name)`,
+        [id],
+      );
     }
     // shared-only users resolve links to documents they can read
     return many(
@@ -109,7 +113,11 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     assertCan(await wsRole(u.id, id), 'edit');
     const [documents, folders] = await Promise.all([
-      many(ctx.db, `SELECT id, name, folder_id AS "folderId", deleted_at AS "deletedAt" FROM documents WHERE workspace_id = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`, [id]),
+      many(
+        ctx.db,
+        `SELECT id, name, folder_id AS "folderId", deleted_at AS "deletedAt" FROM documents WHERE workspace_id = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`,
+        [id],
+      ),
       many(
         ctx.db,
         `SELECT f.id, f.name, f.deleted_at AS "deletedAt" FROM folders f WHERE f.workspace_id = $1 AND f.deleted_at IS NOT NULL
@@ -141,16 +149,24 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     assertCan(await wsRole(u.id, id), 'manage');
     const body = z.object({ user: z.string().trim().min(1), role: memberRole }).parse(req.body);
-    const target = await one<{ id: string; email: string }>(ctx.db, 'SELECT id, email FROM users WHERE (lower(username) = lower($1) OR lower(email) = lower($1)) AND disabled_at IS NULL', [
-      body.user.replace(/^@/, ''),
-    ]);
+    const target = await one<{ id: string; email: string }>(
+      ctx.db,
+      'SELECT id, email FROM users WHERE (lower(username) = lower($1) OR lower(email) = lower($1)) AND disabled_at IS NULL',
+      [body.user.replace(/^@/, '')],
+    );
     const ws = await one<{ name: string }>(ctx.db, 'SELECT name FROM workspaces WHERE id = $1', [id]);
     if (!target) {
       if (!body.user.includes('@') || body.user.startsWith('@')) throw notFound('No user with that username');
       const settings = await getSignupSettings(ctx);
       if (settings.mode === 'closed') throw badRequest('That person has no account and sign-up is closed');
       const token = randomToken();
-      await ctx.db.query('INSERT INTO invites (token_hash, email, invited_by, workspace_id, role) VALUES ($1, $2, $3, $4, $5)', [sha256(token), body.user.toLowerCase(), u.id, id, body.role]);
+      await ctx.db.query('INSERT INTO invites (token_hash, email, invited_by, workspace_id, role) VALUES ($1, $2, $3, $4, $5)', [
+        sha256(token),
+        body.user.toLowerCase(),
+        u.id,
+        id,
+        body.role,
+      ]);
       const link = `${ctx.cfg.PUBLIC_URL}/signup?invite=${token}&email=${encodeURIComponent(body.user.toLowerCase())}`;
       await ctx.mailer.send({
         to: body.user,
@@ -349,7 +365,10 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
            UPDATE folders SET deleted_at = NULL WHERE id IN (SELECT id FROM sub) RETURNING id`,
           [id, f.deleted_at],
         );
-        await c.query('UPDATE documents SET deleted_at = NULL WHERE folder_id = ANY($1::uuid[]) AND deleted_at = $2', [sub.rows.map((r) => r.id), f.deleted_at]);
+        await c.query('UPDATE documents SET deleted_at = NULL WHERE folder_id = ANY($1::uuid[]) AND deleted_at = $2', [
+          sub.rows.map((r) => r.id),
+          f.deleted_at,
+        ]);
         // re-link references to restored documents
         await c.query(
           `UPDATE links l SET target_id = d.id FROM documents d, documents s
@@ -369,7 +388,14 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
   // ---- cross-workspace views ----
   app.get('/api/search', async (req) => {
     const u = requireUser(req);
-    const q = z.object({ q: z.string().trim().min(1).max(200), workspaceId: z.uuid().optional(), tag: z.string().optional(), limit: z.coerce.number().min(1).max(100).default(30) }).parse(req.query);
+    const q = z
+      .object({
+        q: z.string().trim().min(1).max(200),
+        workspaceId: z.uuid().optional(),
+        tag: z.string().optional(),
+        limit: z.coerce.number().min(1).max(100).default(30),
+      })
+      .parse(req.query);
     return many(
       ctx.db,
       `WITH RECURSIVE ${ACCESSIBLE_DOCS_CTE},

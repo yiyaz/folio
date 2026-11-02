@@ -10,7 +10,11 @@ const STATE_COOKIE = 'folio_oidc';
 export const oidcEnabled = (ctx: AppContext) => !!(ctx.cfg.OIDC_ISSUER && ctx.cfg.OIDC_CLIENT_ID);
 
 function sanitizeUsername(s: string): string {
-  const base = s.toLowerCase().replace(/@.*$/, '').replace(/[^a-z0-9_.-]/g, '').replace(/^[.-]+|[.-]+$/g, '');
+  const base = s
+    .toLowerCase()
+    .replace(/@.*$/, '')
+    .replace(/[^a-z0-9_.-]/g, '')
+    .replace(/^[.-]+|[.-]+$/g, '');
   return (base.length >= 3 ? base : `user${base}`).slice(0, 28);
 }
 
@@ -71,14 +75,19 @@ export async function registerOidc(app: FastifyInstance) {
     let user = await one<{ id: string }>(ctx.db, 'SELECT id FROM users WHERE oidc_sub = $1 AND disabled_at IS NULL', [sub]);
     if (!user && email && claims.email_verified !== false) {
       // link to an existing account with the same (IdP-verified) e-mail
-      user = await one<{ id: string }>(ctx.db, 'UPDATE users SET oidc_sub = $2, email_verified_at = COALESCE(email_verified_at, now()) WHERE lower(email) = $1 AND oidc_sub IS NULL RETURNING id', [email, sub]);
+      user = await one<{ id: string }>(
+        ctx.db,
+        'UPDATE users SET oidc_sub = $2, email_verified_at = COALESCE(email_verified_at, now()) WHERE lower(email) = $1 AND oidc_sub IS NULL RETURNING id',
+        [email, sub],
+      );
     }
     if (!user) {
       const settings = await getSignupSettings(ctx);
       if (settings.mode === 'closed' || !email) return reply.redirect('/login?error=oidc_signup');
       if (settings.mode === 'domain' && !settings.allowedDomains.includes(email.split('@')[1])) return reply.redirect('/login?error=oidc_domain');
       let username = sanitizeUsername(claims.preferred_username || email);
-      for (let i = 2; await one(ctx.db, 'SELECT 1 FROM users WHERE lower(username) = $1', [username]); i++) username = `${sanitizeUsername(claims.preferred_username || email)}${i}`;
+      for (let i = 2; await one(ctx.db, 'SELECT 1 FROM users WHERE lower(username) = $1', [username]); i++)
+        username = `${sanitizeUsername(claims.preferred_username || email)}${i}`;
       const created = await createUser(ctx, { email, username, displayName: claims.name || username, passwordHash: null, verified: true, oidcSub: sub });
       user = { id: created.id };
     }

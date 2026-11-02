@@ -21,6 +21,14 @@ async function shutdown(signal: string) {
   await otel?.shutdown().catch(() => {});
   process.exit(0);
 }
+process.on('unhandledRejection', (err) => {
+  app.log.error({ err }, 'unhandled promise rejection');
+});
+process.on('uncaughtException', (err) => {
+  // state may be corrupt: log, then let the orchestrator restart us
+  app.log.fatal({ err }, 'uncaught exception');
+  process.exit(1);
+});
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 

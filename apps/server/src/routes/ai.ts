@@ -6,9 +6,11 @@ import { HttpError } from '../errors.js';
 
 const PROMPTS = {
   summarize: 'Summarize the following Markdown document for a busy colleague. Reply in Markdown with a one-sentence TL;DR followed by at most 6 bullet points.',
-  explain: 'Explain what the following code or technical text does, for an engineer who is new to it. Reply in concise Markdown. Point out anything surprising or risky.',
+  explain:
+    'Explain what the following code or technical text does, for an engineer who is new to it. Reply in concise Markdown. Point out anything surprising or risky.',
   docs: 'Write clear Markdown documentation for the following code: purpose, usage example, parameters/return values and caveats. Reply with Markdown only.',
-  improve: 'Improve the clarity and grammar of the following Markdown text without changing its meaning or its Markdown structure. Reply with the rewritten Markdown only.',
+  improve:
+    'Improve the clarity and grammar of the following Markdown text without changing its meaning or its Markdown structure. Reply with the rewritten Markdown only.',
 } as const;
 
 /**

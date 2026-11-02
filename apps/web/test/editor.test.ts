@@ -5,6 +5,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { ensureSyntaxTree } from '@codemirror/language';
 import { toggleWrap, setHeading, toggleLinePrefix, insertBlock } from '../src/editor/commands';
 import { livePreview } from '../src/editor/livePreview';
+import { Frontmatter } from '../src/editor/frontmatter';
 import { fuzzy } from '../src/components/Palette';
 import { parseCellRange, renderNotebook } from '../src/render/notebook';
 import { sortableTable } from '../src/render/table';
@@ -12,7 +13,14 @@ import { sortableTable } from '../src/render/table';
 function view(doc: string, anchor = 0, head = anchor, extensions: any[] = []) {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
-  return new EditorView({ state: EditorState.create({ doc, selection: EditorSelection.single(anchor, head), extensions: [markdown({ base: markdownLanguage }), ...extensions] }), parent });
+  return new EditorView({
+    state: EditorState.create({
+      doc,
+      selection: EditorSelection.single(anchor, head),
+      extensions: [markdown({ base: markdownLanguage, extensions: [Frontmatter] }), ...extensions],
+    }),
+    parent,
+  });
 }
 
 describe('formatting commands', () => {
@@ -91,6 +99,14 @@ describe('live preview decorations', () => {
     expect(html).not.toContain('cm-lp-tag');
   });
 
+  it('treats YAML front matter as properties, not a rule and a heading', () => {
+    const html = classesFor('---\ntags: [a, b]\nstatus: done\n---\n# Title\n\ntext');
+    expect(html.match(/cm-lp-frontmatter/g)?.length).toBe(4);
+    expect(html).not.toContain('cm-lp-hr');
+    expect(html).not.toContain('cm-lp-link');
+    expect(html).toContain('cm-lp-h1');
+  });
+
   it('renders task checkboxes', () => {
     const html = classesFor('- [x] done\n- [ ] todo\n\nend');
     expect(html.match(/cm-lp-checkbox/g)?.length).toBe(2);
@@ -138,14 +154,29 @@ describe('notebook rendering', () => {
   });
 
   it('respects the cells filter', () => {
-    const el = renderNotebook({ cells: [{ cell_type: 'markdown', source: 'a' }, { cell_type: 'markdown', source: 'b' }] }, { cells: '2' });
+    const el = renderNotebook(
+      {
+        cells: [
+          { cell_type: 'markdown', source: 'a' },
+          { cell_type: 'markdown', source: 'b' },
+        ],
+      },
+      { cells: '2' },
+    );
     expect(el.textContent?.trim()).toBe('b');
   });
 });
 
 describe('sortable table', () => {
   it('sorts numerically and filters', () => {
-    const t = sortableTable(['name', 'n'], [['b', '10'], ['a', '9'], ['c', '100']]);
+    const t = sortableTable(
+      ['name', 'n'],
+      [
+        ['b', '10'],
+        ['a', '9'],
+        ['c', '100'],
+      ],
+    );
     const th = t.querySelectorAll('th')[1] as HTMLElement;
     th.click();
     const col = () => [...t.querySelectorAll('tbody tr')].map((r) => r.children[1].textContent);

@@ -20,7 +20,7 @@ export interface Notebook {
   metadata?: { language_info?: { name?: string }; kernelspec?: { language?: string } };
 }
 
-const join = (s: string | string[] | undefined) => (Array.isArray(s) ? s.join('') : s ?? '');
+const join = (s: string | string[] | undefined) => (Array.isArray(s) ? s.join('') : (s ?? ''));
 const stripAnsi = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, '');
 
 /** Parse "1-3,5" into a set of 1-based cell numbers. */

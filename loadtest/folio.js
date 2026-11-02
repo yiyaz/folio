@@ -17,7 +17,15 @@ const conflicts = new Rate('folio_save_conflicts');
 export const options = {
   noCookiesReset: true, // keep each VU's session cookie across iterations
   scenarios: {
-    editors: { executor: 'ramping-vus', startVUs: 1, stages: [{ duration: '20s', target: 20 }, { duration: '40s', target: 20 }, { duration: '10s', target: 0 }] },
+    editors: {
+      executor: 'ramping-vus',
+      startVUs: 1,
+      stages: [
+        { duration: '20s', target: 20 },
+        { duration: '40s', target: 20 },
+        { duration: '10s', target: 0 },
+      ],
+    },
   },
   thresholds: {
     http_req_failed: ['rate<0.01'],
@@ -53,7 +61,7 @@ export default function (data) {
     const r = send('PUT', `${BASE}/api/documents/${s.docId}/content`, { content: s.content, baseVersion: s.version });
     saveLatency.add(r.timings.duration);
     conflicts.add(r.status === 409);
-    if (check(r, { 'saved': (x) => x.status === 200 })) s.version = r.json().version;
+    if (check(r, { saved: (x) => x.status === 200 })) s.version = r.json().version;
   });
 
   group('read', () => {

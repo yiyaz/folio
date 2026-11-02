@@ -84,16 +84,10 @@ export async function registerAttachmentRoutes(app: FastifyInstance) {
     const key = keys.attachment(workspaceId, id);
     await ctx.storage.put(key, buf, mime);
     const filename = file.filename.replace(/[^\w.\- ()]+/g, '_').slice(0, 200) || 'file';
-    await ctx.db.query('INSERT INTO attachments (id, workspace_id, document_id, filename, mime, size, storage_key, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [
-      id,
-      workspaceId,
-      documentId,
-      filename,
-      mime,
-      buf.length,
-      key,
-      u.id,
-    ]);
+    await ctx.db.query(
+      'INSERT INTO attachments (id, workspace_id, document_id, filename, mime, size, storage_key, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [id, workspaceId, documentId, filename, mime, buf.length, key, u.id],
+    );
     const url = `/api/attachments/${id}/${encodeURIComponent(filename)}`;
     const markdown = mime.startsWith('image/') ? `![${filename}](${url})` : `[${filename}](${url})`;
     return reply.code(201).send({ id, url, filename, mime, size: buf.length, markdown });
@@ -141,7 +135,9 @@ export async function registerAttachmentRoutes(app: FastifyInstance) {
       [id],
     );
     if (!att) throw notFound();
-    const ok = can(await workspaceRole(ctx.db, u.id, att.workspace_id), 'read') || (att.document_id && can((await documentAccess(ctx.db, u.id, att.document_id))?.role ?? null, 'read'));
+    const ok =
+      can(await workspaceRole(ctx.db, u.id, att.workspace_id), 'read') ||
+      (att.document_id && can((await documentAccess(ctx.db, u.id, att.document_id))?.role ?? null, 'read'));
     if (!ok) throw notFound();
     return { id, filename: att.filename, mime: att.mime, size: att.size, workspaceId: att.workspace_id, documentId: att.document_id };
   });

@@ -190,7 +190,13 @@ export async function enhance(root: HTMLElement, ctx: EnhanceContext): Promise<v
             // never let a spec pull data from arbitrary origins
             if (spec?.data?.url && !safeSrc(spec.data.url)) throw new Error('data.url must point to an attachment (/api/attachments/…)');
             if (spec?.data?.url) spec.data.url = withToken(spec.data.url, ctx);
-            await embed(div, spec, { actions: { export: true, source: false, compiled: false, editor: false }, theme: ctx.theme === 'dark' ? 'dark' : undefined, renderer: 'svg', ast: true, expr: expressionInterpreter } as never);
+            await embed(div, spec, {
+              actions: { export: true, source: false, compiled: false, editor: false },
+              theme: ctx.theme === 'dark' ? 'dark' : undefined,
+              renderer: 'svg',
+              ast: true,
+              expr: expressionInterpreter,
+            } as never);
           } catch (e) {
             div.replaceChildren(errorBox(`Vega-Lite: ${e instanceof Error ? e.message : e}`));
           }
@@ -291,7 +297,13 @@ export async function renderDataset(holder: HTMLElement, url: string, limit = 50
       const meta = parquetMetadata(buf);
       const cols = parquetSchema(meta).children.map((c: any) => c.element.name);
       const rows = await parquetReadObjects({ file: buf, rowEnd: limit });
-      holder.appendChild(sortableTable(cols, rows.map((o: any) => cols.map((c: string) => o[c])), { total: Number(meta.num_rows), caption: `parquet · ${cols.length} columns` }));
+      holder.appendChild(
+        sortableTable(
+          cols,
+          rows.map((o: any) => cols.map((c: string) => o[c])),
+          { total: Number(meta.num_rows), caption: `parquet · ${cols.length} columns` },
+        ),
+      );
     } else {
       const text = await r.text();
       const parsed = Papa.parse<string[]>(text.trim(), { skipEmptyLines: true, delimiter: url.includes('.tsv') ? '\t' : undefined });

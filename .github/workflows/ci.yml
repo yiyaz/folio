@@ -28,9 +28,13 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm format:check
       - run: pnpm typecheck
-      - run: pnpm test # S3 tests start adobe/s3mock via Testcontainers (Docker is available on GitHub runners)
+      # coverage thresholds are enforced; S3 tests start adobe/s3mock via Testcontainers
+      - run: pnpm test:coverage
+      - run: pnpm --filter @folio/web --filter @folio/cli test
       - run: pnpm build
+      - run: pnpm audit --prod --audit-level high
 
   e2e:
     name: End-to-end (Playwright)

@@ -27,7 +27,11 @@ export function NotificationBell() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
-  const { data } = useQuery({ queryKey: ['notifications'], queryFn: () => get<{ items: Notification[]; unread: number }>('/api/notifications'), refetchInterval: 120_000 });
+  const { data } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: () => get<{ items: Notification[]; unread: number }>('/api/notifications'),
+    refetchInterval: 120_000,
+  });
 
   useEffect(
     () =>

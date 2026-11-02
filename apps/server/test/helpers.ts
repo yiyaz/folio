@@ -113,7 +113,12 @@ export class Client {
 let seq = 0;
 export async function signup(app: FastifyInstance, name = `user${++seq}`): Promise<Client> {
   const c = new Client(app);
-  const r = await c.post('/api/auth/signup', { email: `${name}@example.com`, username: name, displayName: name[0].toUpperCase() + name.slice(1), password: 'password-123456' });
+  const r = await c.post('/api/auth/signup', {
+    email: `${name}@example.com`,
+    username: name,
+    displayName: name[0].toUpperCase() + name.slice(1),
+    password: 'password-123456',
+  });
   if (r.statusCode !== 201) throw new Error(`signup failed: ${r.body}`);
   c.user = r.data.user;
   return c;

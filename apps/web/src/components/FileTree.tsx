@@ -31,7 +31,19 @@ function loadExpanded(): Set<string> {
   }
 }
 
-export function FileTree({ workspaceId, tree, canEdit, onShareFolder, onNewFromTemplate }: { workspaceId: string; tree: Tree; canEdit: boolean; onShareFolder: (f: TreeFolder) => void; onNewFromTemplate: (folderId: string | null) => void }) {
+export function FileTree({
+  workspaceId,
+  tree,
+  canEdit,
+  onShareFolder,
+  onNewFromTemplate,
+}: {
+  workspaceId: string;
+  tree: Tree;
+  canEdit: boolean;
+  onShareFolder: (f: TreeFolder) => void;
+  onNewFromTemplate: (folderId: string | null) => void;
+}) {
   const root = useMemo(() => buildTree(tree), [tree]);
   const [expanded, setExpanded] = useState<Set<string>>(loadExpanded);
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -130,7 +142,13 @@ export function FileTree({ workspaceId, tree, canEdit, onShareFolder, onNewFromT
         const open = expanded.has(f.id);
         return (
           <li key={f.id}>
-            <div className={cx('tree-row', dragOver === f.id && 'drop-target')} style={{ paddingLeft: 8 + depth * 14 }} {...dropProps(f.id)} {...dragProps('folder', f.id)} data-testid={`folder-${f.name}`}>
+            <div
+              className={cx('tree-row', dragOver === f.id && 'drop-target')}
+              style={{ paddingLeft: 8 + depth * 14 }}
+              {...dropProps(f.id)}
+              {...dragProps('folder', f.id)}
+              data-testid={`folder-${f.name}`}
+            >
               <button className="tree-toggle" onClick={() => toggle(f.id)} aria-expanded={open} aria-label={`${open ? 'Collapse' : 'Expand'} ${f.name}`}>
                 {open ? '▾' : '▸'}
               </button>
@@ -169,7 +187,14 @@ export function FileTree({ workspaceId, tree, canEdit, onShareFolder, onNewFromT
                         className="danger"
                         onClick={async () => {
                           close();
-                          if (await confirm({ title: 'Move folder to trash?', message: `"${f.name}" and everything in it will be moved to the trash.`, confirmText: 'Move to trash', danger: true }))
+                          if (
+                            await confirm({
+                              title: 'Move folder to trash?',
+                              message: `"${f.name}" and everything in it will be moved to the trash.`,
+                              confirmText: 'Move to trash',
+                              danger: true,
+                            })
+                          )
                             await run(() => del(`/api/folders/${f.id}`));
                         }}
                       >
@@ -186,7 +211,13 @@ export function FileTree({ workspaceId, tree, canEdit, onShareFolder, onNewFromT
       })}
       {n.docs.map((d) => (
         <li key={d.id}>
-          <NavLink to={`/d/${d.id}`} className={({ isActive }) => cx('tree-row tree-doc', (isActive || docId === d.id) && 'active')} style={{ paddingLeft: 22 + depth * 14 }} {...dragProps('doc', d.id)} title={d.title}>
+          <NavLink
+            to={`/d/${d.id}`}
+            className={({ isActive }) => cx('tree-row tree-doc', (isActive || docId === d.id) && 'active')}
+            style={{ paddingLeft: 22 + depth * 14 }}
+            {...dragProps('doc', d.id)}
+            title={d.title}
+          >
             <span aria-hidden="true">📄 </span>
             {d.name}
           </NavLink>

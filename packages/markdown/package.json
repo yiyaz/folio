@@ -7,7 +7,8 @@
   "types": "src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "github-slugger": "^2.0.0",
@@ -32,6 +33,7 @@
     "@types/hast": "^3.0.5",
     "@types/mdast": "^4.0.4",
     "@types/unist": "^3.0.3",
+    "@vitest/coverage-v8": "^5.0.5",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5"
   }

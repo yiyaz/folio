@@ -25,13 +25,33 @@ function GuestOnly({ children }: { children: React.ReactNode }) {
 export function App() {
   return (
     <Routes>
-      <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
-      <Route path="/signup" element={<GuestOnly><SignupPage /></GuestOnly>} />
+      <Route
+        path="/login"
+        element={
+          <GuestOnly>
+            <LoginPage />
+          </GuestOnly>
+        }
+      />
+      <Route
+        path="/signup"
+        element={
+          <GuestOnly>
+            <SignupPage />
+          </GuestOnly>
+        }
+      />
       <Route path="/verify" element={<VerifyPage />} />
       <Route path="/forgot" element={<ForgotPage />} />
       <Route path="/reset" element={<ResetPage />} />
       <Route path="/p/:token" element={<PublicDocPage />} />
-      <Route element={<RequireAuth><Layout /></RequireAuth>}>
+      <Route
+        element={
+          <RequireAuth>
+            <Layout />
+          </RequireAuth>
+        }
+      >
         <Route index element={<HomePage />} />
         <Route path="/d/:docId" element={<DocPage />} />
         <Route path="/f/:folderId" element={<FolderPage />} />

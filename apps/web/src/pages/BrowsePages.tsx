@@ -95,7 +95,15 @@ export function SearchPage() {
           setParams({ q: input });
         }}
       >
-        <input className="grow" value={input} onChange={(e) => setInput(e.target.value)} placeholder='Words, "exact phrase", -exclude' autoFocus aria-label="Search query" data-testid="search-input" />
+        <input
+          className="grow"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder='Words, "exact phrase", -exclude'
+          autoFocus
+          aria-label="Search query"
+          data-testid="search-input"
+        />
         <select value={scope} onChange={(e) => setScope(e.target.value as 'all' | 'ws')} aria-label="Scope">
           <option value="all">All workspaces</option>
           <option value="ws">This workspace</option>
@@ -247,7 +255,10 @@ export function FolderPage() {
 
 export function UserPage() {
   const { username = '' } = useParams();
-  const { data, isLoading } = useQuery({ queryKey: ['user', username], queryFn: () => get<PublicUser & { createdAt: string }>(`/api/users/by-username/${username}`) });
+  const { data, isLoading } = useQuery({
+    queryKey: ['user', username],
+    queryFn: () => get<PublicUser & { createdAt: string }>(`/api/users/by-username/${username}`),
+  });
   if (isLoading) return <Spinner />;
   if (!data) return <EmptyState title="User not found" />;
   return (
@@ -273,7 +284,10 @@ export function TrashPage() {
   const { confirm } = useDialogs();
   const { data, refetch } = useQuery({
     queryKey: ['trash', wsId],
-    queryFn: () => get<{ documents: { id: string; name: string; deletedAt: string }[]; folders: { id: string; name: string; deletedAt: string }[] }>(`/api/workspaces/${wsId}/trash`),
+    queryFn: () =>
+      get<{ documents: { id: string; name: string; deletedAt: string }[]; folders: { id: string; name: string; deletedAt: string }[] }>(
+        `/api/workspaces/${wsId}/trash`,
+      ),
   });
   const act = async (fn: () => Promise<unknown>) => {
     try {
@@ -309,7 +323,14 @@ export function TrashPage() {
             <button
               className="btn btn-small btn-danger"
               onClick={async () => {
-                if (await confirm({ title: 'Delete permanently?', message: `"${d.name}" and its history will be deleted forever.`, danger: true, confirmText: 'Delete forever' }))
+                if (
+                  await confirm({
+                    title: 'Delete permanently?',
+                    message: `"${d.name}" and its history will be deleted forever.`,
+                    danger: true,
+                    confirmText: 'Delete forever',
+                  })
+                )
                   await act(() => del(`/api/documents/${d.id}/permanent`));
               }}
             >
@@ -324,7 +345,11 @@ export function TrashPage() {
 
 export function PublicDocPage() {
   const { token = '' } = useParams();
-  const { data, error, isLoading } = useQuery({ queryKey: ['public', token], queryFn: () => get<{ title: string; content: string; updatedAt: string }>(`/api/public/${token}`), retry: false });
+  const { data, error, isLoading } = useQuery({
+    queryKey: ['public', token],
+    queryFn: () => get<{ title: string; content: string; updatedAt: string }>(`/api/public/${token}`),
+    retry: false,
+  });
   useEffect(() => {
     if (data) document.title = `${data.title} · Folio`;
   }, [data]);

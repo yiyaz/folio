@@ -81,8 +81,11 @@ Inline \`[[nope]]\` code.
     expect(parseDocument('no title').title).toBeNull();
   });
 
-  it('produces searchable plain text', () => {
-    expect(p.text).toContain('A key fact');
+  it('produces readable plain text for search (no wiki-link or block-id markup)', () => {
+    expect(p.text).toContain('A key fact.');
+    expect(p.text).not.toContain('^fact-1');
+    expect(p.text).toContain('linking Feature Store and params for');
+    expect(parseDocument('See [[Doc#^b1]] and [[Other#Setup]].').text).toBe('See Doc and Other Setup.');
   });
 });
 

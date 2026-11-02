@@ -66,7 +66,11 @@ export function LoginPage() {
       <form onSubmit={submit} className="stack">
         {error && <div className="alert alert-error">{error}</div>}
         {unverified && (
-          <button type="button" className="link-btn" onClick={() => post('/api/auth/resend-verification', { email: login }).then(() => setError('Verification e-mail sent (if the account exists).'))}>
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => post('/api/auth/resend-verification', { email: login }).then(() => setError('Verification e-mail sent (if the account exists).'))}
+          >
             Resend verification e-mail
           </button>
         )}
@@ -150,7 +154,16 @@ export function SignupPage() {
           </label>
           <label className="field">
             <span>Username</span>
-            <input value={form.username} onChange={set('username')} required pattern="[a-zA-Z0-9_][a-zA-Z0-9_.\-]*[a-zA-Z0-9_]" minLength={3} maxLength={32} name="username" title="3-32 letters, numbers, . - _" />
+            <input
+              value={form.username}
+              onChange={set('username')}
+              required
+              pattern="[a-zA-Z0-9_][a-zA-Z0-9_.\-]*[a-zA-Z0-9_]"
+              minLength={3}
+              maxLength={32}
+              name="username"
+              title="3-32 letters, numbers, . - _"
+            />
           </label>
           <label className="field">
             <span>E-mail</span>
@@ -256,7 +269,15 @@ export function ResetPage() {
           {error && <div className="alert alert-error">{error}</div>}
           <label className="field">
             <span>New password</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={10} required autoFocus autoComplete="new-password" />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={10}
+              required
+              autoFocus
+              autoComplete="new-password"
+            />
           </label>
           <button className="btn btn-primary btn-block" type="submit">
             Update password

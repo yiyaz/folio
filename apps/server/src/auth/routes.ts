@@ -29,7 +29,12 @@ export function publicMe(u: AuthUser) {
 export async function startSession(ctx: AppContext, reply: FastifyReply, userId: string, userAgent?: string) {
   const token = randomToken();
   const expires = new Date(Date.now() + ctx.cfg.SESSION_TTL_DAYS * 86400_000);
-  await ctx.db.query('INSERT INTO sessions (token_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)', [sha256(token), userId, expires, userAgent?.slice(0, 300)]);
+  await ctx.db.query('INSERT INTO sessions (token_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)', [
+    sha256(token),
+    userId,
+    expires,
+    userAgent?.slice(0, 300),
+  ]);
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
     httpOnly: true,
@@ -42,7 +47,12 @@ export async function startSession(ctx: AppContext, reply: FastifyReply, userId:
 async function issueEmailToken(ctx: AppContext, userId: string, kind: 'verify' | 'reset') {
   const token = randomToken();
   const ttl = kind === 'verify' ? 48 * 3600_000 : 3600_000;
-  await ctx.db.query('INSERT INTO email_tokens (token_hash, user_id, kind, expires_at) VALUES ($1, $2, $3, $4)', [sha256(token), userId, kind, new Date(Date.now() + ttl)]);
+  await ctx.db.query('INSERT INTO email_tokens (token_hash, user_id, kind, expires_at) VALUES ($1, $2, $3, $4)', [
+    sha256(token),
+    userId,
+    kind,
+    new Date(Date.now() + ttl),
+  ]);
   return token;
 }
 
@@ -87,9 +97,17 @@ export async function createUser(
       throw e;
     }
     if (input.inviteHash) {
-      const inv = await one<{ workspace_id: string | null; role: string | null }>(c, 'UPDATE invites SET used_at = now() WHERE token_hash = $1 RETURNING workspace_id, role', [input.inviteHash]);
+      const inv = await one<{ workspace_id: string | null; role: string | null }>(
+        c,
+        'UPDATE invites SET used_at = now() WHERE token_hash = $1 RETURNING workspace_id, role',
+        [input.inviteHash],
+      );
       if (inv?.workspace_id) {
-        await c.query('INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [inv.workspace_id, row.id, inv.role ?? 'editor']);
+        await c.query('INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [
+          inv.workspace_id,
+          row.id,
+          inv.role ?? 'editor',
+        ]);
       }
     }
     return row;
@@ -106,12 +124,22 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.get('/api/auth/config', async () => {
     const s = await getSignupSettings(ctx);
     const noUsers = !(await one(ctx.db, 'SELECT 1 FROM users LIMIT 1'));
-    return { signupMode: noUsers ? 'open' : s.mode, oidc: oidcEnabled(ctx) ? { name: ctx.cfg.OIDC_NAME } : null, requireEmailVerification: ctx.cfg.REQUIRE_EMAIL_VERIFICATION };
+    return {
+      signupMode: noUsers ? 'open' : s.mode,
+      oidc: oidcEnabled(ctx) ? { name: ctx.cfg.OIDC_NAME } : null,
+      requireEmailVerification: ctx.cfg.REQUIRE_EMAIL_VERIFICATION,
+    };
   });
 
   app.post('/api/auth/signup', authLimit, async (req, reply) => {
     const body = z
-      .object({ email: emailSchema, username: usernameSchema, displayName: z.string().trim().min(1).max(80), password: passwordSchema, inviteToken: z.string().optional() })
+      .object({
+        email: emailSchema,
+        username: usernameSchema,
+        displayName: z.string().trim().min(1).max(80),
+        password: passwordSchema,
+        inviteToken: z.string().optional(),
+      })
       .parse(req.body);
     const settings = await getSignupSettings(ctx);
     const noUsers = !(await one(ctx.db, 'SELECT 1 FROM users LIMIT 1'));
@@ -184,7 +212,11 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.post('/api/auth/resend-verification', authLimit, async (req) => {
     const { email } = z.object({ email: emailSchema }).parse(req.body);
-    const u = await one<{ id: string; email: string; email_verified_at: Date | null }>(ctx.db, 'SELECT id, email, email_verified_at FROM users WHERE lower(email) = $1', [email]);
+    const u = await one<{ id: string; email: string; email_verified_at: Date | null }>(
+      ctx.db,
+      'SELECT id, email, email_verified_at FROM users WHERE lower(email) = $1',
+      [email],
+    );
     if (u && !u.email_verified_at) await sendVerification(ctx, u);
     return { ok: true }; // never reveal whether the account exists
   });
@@ -206,7 +238,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   app.post('/api/auth/reset', authLimit, async (req) => {
     const body = z.object({ token: z.string().min(10), password: passwordSchema }).parse(req.body);
     const userId = await consumeEmailToken(ctx, body.token, 'reset');
-    await ctx.db.query('UPDATE users SET password_hash = $2, email_verified_at = COALESCE(email_verified_at, now()) WHERE id = $1', [userId, await hash(body.password, ARGON)]);
+    await ctx.db.query('UPDATE users SET password_hash = $2, email_verified_at = COALESCE(email_verified_at, now()) WHERE id = $1', [
+      userId,
+      await hash(body.password, ARGON),
+    ]);
     await ctx.db.query('DELETE FROM sessions WHERE user_id = $1', [userId]); // log out everywhere
     return { ok: true };
   });

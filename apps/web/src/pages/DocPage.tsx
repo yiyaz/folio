@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { normalizeName, headingSlug } from '@folio/markdown';
-import { ApiError, api, del, get, patch, post, put } from '../api';
+import { ApiError, api, del, get, isRetryable, patch, post, put } from '../api';
 import { useAuth, useClientConfig } from '../auth';
 import { useNames, useTags } from '../hooks';
 import { realtime } from '../realtime';
@@ -23,7 +23,11 @@ type Panel = 'outline' | 'backlinks' | 'comments' | 'history' | null;
 
 export function DocPage() {
   const { docId } = useParams<{ docId: string }>();
-  const { data: doc, error, isLoading } = useQuery({ queryKey: ['doc', docId], queryFn: () => get<Doc>(`/api/documents/${docId}`), staleTime: Infinity, retry: false });
+  const {
+    data: doc,
+    error,
+    isLoading,
+  } = useQuery({ queryKey: ['doc', docId], queryFn: () => get<Doc>(`/api/documents/${docId}`), staleTime: Infinity, retry: false });
   if (isLoading) return <Spinner />;
   if (error || !doc)
     return (
@@ -65,7 +69,7 @@ function DocEditor({ doc }: { doc: Doc }) {
   const [conflict, setConflict] = useState<{ content: string; version: number } | null>(null);
   const [remoteUpdate, setRemoteUpdate] = useState<string | null>(null);
   const [presence, setPresence] = useState<PublicUser[]>([]);
-  const [mode, setModeState] = useState<EditorMode>(() => (canEdit ? me?.prefs.editorMode ?? 'live' : 'read'));
+  const [mode, setModeState] = useState<EditorMode>(() => (canEdit ? (me?.prefs.editorMode ?? 'live') : 'read'));
   const [panel, setPanel] = useState<Panel>(() => (params.get('comment') ? 'comments' : null));
   const [share, setShare] = useState<{ user?: string } | null>(null);
   const [selection, setSelection] = useState<{ from: number; to: number; text: string } | null>(null);
@@ -74,6 +78,7 @@ function DocEditor({ doc }: { doc: Doc }) {
   const [ai, setAi] = useState<{ title: string; text: string | null } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlight = useRef<Promise<void> | null>(null);
+  const retries = useRef(0);
 
   const { data: names = [] } = useNames(doc.workspaceId);
   const { data: tags = [] } = useTags(doc.workspaceId);
@@ -91,8 +96,13 @@ function DocEditor({ doc }: { doc: Doc }) {
     setSaveState('saving');
     const p = (async () => {
       try {
-        const r = await put<{ version: number; title: string; mentionedWithoutAccess: { username: string }[] }>(`/api/documents/${doc.id}/content`, { content: text, baseVersion: versionRef.current });
+        const r = await put<{ version: number; title: string; mentionedWithoutAccess: { username: string }[] }>(`/api/documents/${doc.id}/content`, {
+          content: text,
+          baseVersion: versionRef.current,
+        });
         versionRef.current = r.version;
+        if (retries.current > 0) toast('Saved again — all changes are stored', 'success');
+        retries.current = 0;
         setSaveState(contentRef.current === text ? 'saved' : 'dirty');
         if (r.mentionedWithoutAccess.length) {
           const u = r.mentionedWithoutAccess[0].username;
@@ -105,6 +115,13 @@ function DocEditor({ doc }: { doc: Doc }) {
         if (e instanceof ApiError && e.status === 409) {
           setConflict({ content: e.details.content, version: e.details.version });
           setSaveState('conflict');
+        } else if (isRetryable(e)) {
+          // keep the edit and retry with backoff (offline, deploy in progress, ...)
+          setSaveState('error');
+          const delay = Math.min(30_000, 1000 * 2 ** retries.current++);
+          if (retries.current === 1) toast(`Couldn't save (${errMsg(e)}). Retrying automatically…`, 'error');
+          if (saveTimer.current) clearTimeout(saveTimer.current);
+          saveTimer.current = setTimeout(() => void save(), delay);
         } else {
           setSaveState('error');
           toast(`Saving failed: ${errMsg(e)}`, 'error');
@@ -232,7 +249,10 @@ function DocEditor({ doc }: { doc: Doc }) {
   // ---- mode ----
   const setMode = (m: EditorMode) => {
     setModeState(m);
-    if (canEdit && me) void patch('/api/users/me', { prefs: { editorMode: m } }).then((r) => setMe(r.user)).catch(() => {});
+    if (canEdit && me)
+      void patch('/api/users/me', { prefs: { editorMode: m } })
+        .then((r) => setMe(r.user))
+        .catch(() => {});
   };
 
   // ---- actions ----
@@ -251,7 +271,15 @@ function DocEditor({ doc }: { doc: Doc }) {
   };
 
   const trash = async () => {
-    if (!(await confirm({ title: 'Move to trash?', message: `"${doc.name}" will be moved to the trash. You can restore it later.`, confirmText: 'Move to trash', danger: true }))) return;
+    if (
+      !(await confirm({
+        title: 'Move to trash?',
+        message: `"${doc.name}" will be moved to the trash. You can restore it later.`,
+        confirmText: 'Move to trash',
+        danger: true,
+      }))
+    )
+      return;
     await del(`/api/documents/${doc.id}`);
     toast('Moved to trash');
     navigate('/');
@@ -268,10 +296,19 @@ function DocEditor({ doc }: { doc: Doc }) {
 
   const addComment = async () => {
     if (!selection) return toast('Select some text first', 'info');
-    const body = await prompt({ title: 'Add comment', label: `On “${selection.text.slice(0, 60)}${selection.text.length > 60 ? '…' : ''}”`, confirmText: 'Comment' });
+    const body = await prompt({
+      title: 'Add comment',
+      label: `On “${selection.text.slice(0, 60)}${selection.text.length > 60 ? '…' : ''}”`,
+      confirmText: 'Comment',
+    });
     if (!body) return;
     try {
-      await post(`/api/documents/${doc.id}/comments`, { body, anchorText: selection.text.slice(0, 2000), anchorStart: selection.from, anchorEnd: selection.to });
+      await post(`/api/documents/${doc.id}/comments`, {
+        body,
+        anchorText: selection.text.slice(0, 2000),
+        anchorStart: selection.from,
+        anchorEnd: selection.to,
+      });
       setPanel('comments');
       void qc.invalidateQueries({ queryKey: ['comments', doc.id] });
     } catch (e) {
@@ -339,7 +376,9 @@ function DocEditor({ doc }: { doc: Doc }) {
   useEffect(
     () =>
       register('doc', [
-        ...(['live', 'source', 'split', 'read'] as EditorMode[]).filter((m) => canEdit || m === 'read').map((m) => ({ id: `mode-${m}`, label: `View: ${m} mode`, run: () => setMode(m) })),
+        ...(['live', 'source', 'split', 'read'] as EditorMode[])
+          .filter((m) => canEdit || m === 'read')
+          .map((m) => ({ id: `mode-${m}`, label: `View: ${m} mode`, run: () => setMode(m) })),
         { id: 'doc-share', label: 'Share this document…', run: () => setShare({}) },
         { id: 'doc-history', label: 'Show version history', run: () => setPanel('history') },
         { id: 'doc-backlinks', label: 'Show backlinks', run: () => setPanel('backlinks') },
@@ -420,9 +459,26 @@ function DocEditor({ doc }: { doc: Doc }) {
           ))}
         </div>
         <div className="doc-title-row">
-          <input className="doc-title" value={name} onChange={(e) => setName(e.target.value)} onBlur={rename} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} readOnly={!canEdit} aria-label="Document name" data-testid="doc-name" />
+          <input
+            className="doc-title"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={rename}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            readOnly={!canEdit}
+            aria-label="Document name"
+            data-testid="doc-name"
+          />
           <span className={`save-state save-${saveState}`} data-testid="save-state">
-            {saveState === 'saved' ? 'Saved' : saveState === 'saving' ? 'Saving…' : saveState === 'dirty' ? 'Editing…' : saveState === 'conflict' ? 'Conflict' : 'Not saved'}
+            {saveState === 'saved'
+              ? 'Saved'
+              : saveState === 'saving'
+                ? 'Saving…'
+                : saveState === 'dirty'
+                  ? 'Editing…'
+                  : saveState === 'conflict'
+                    ? 'Conflict'
+                    : 'Not saved'}
           </span>
           <div className="presence" data-testid="presence">
             {presence
@@ -433,7 +489,15 @@ function DocEditor({ doc }: { doc: Doc }) {
           </div>
           <div className="mode-switch" role="tablist" aria-label="View mode">
             {(['live', 'source', 'split', 'read'] as EditorMode[]).map((m) => (
-              <button key={m} role="tab" aria-selected={mode === m} className={cx(mode === m && 'active')} onClick={() => setMode(m)} disabled={!canEdit && m !== 'read'} data-testid={`mode-${m}`}>
+              <button
+                key={m}
+                role="tab"
+                aria-selected={mode === m}
+                className={cx(mode === m && 'active')}
+                onClick={() => setMode(m)}
+                disabled={!canEdit && m !== 'read'}
+                data-testid={`mode-${m}`}
+              >
                 {m === 'live' ? 'Live' : m === 'source' ? 'Source' : m === 'split' ? 'Split' : 'Read'}
               </button>
             ))}
@@ -597,7 +661,14 @@ function DocEditor({ doc }: { doc: Doc }) {
         <aside className="doc-side">
           <div className="side-tabs" role="tablist">
             {(['outline', 'backlinks', 'comments', 'history'] as const).map((p) => (
-              <button key={p} role="tab" aria-selected={panel === p} className={cx(panel === p && 'active')} onClick={() => setPanel(panel === p ? null : p)} data-testid={`panel-${p}`}>
+              <button
+                key={p}
+                role="tab"
+                aria-selected={panel === p}
+                className={cx(panel === p && 'active')}
+                onClick={() => setPanel(panel === p ? null : p)}
+                data-testid={`panel-${p}`}
+              >
                 {p === 'outline' ? '☰' : p === 'backlinks' ? '↩' : p === 'comments' ? '💬' : '🕘'}
                 <span className="tab-label">{p}</span>
                 {p === 'comments' && openComments > 0 && <span className="count">{openComments}</span>}
@@ -616,7 +687,16 @@ function DocEditor({ doc }: { doc: Doc }) {
                 />
               )}
               {panel === 'backlinks' && <BacklinksPanel docId={doc.id} />}
-              {panel === 'comments' && <CommentsPanel docId={doc.id} role={doc.role} focusId={params.get('comment')} onFocusAnchor={focusAnchor} showResolved={showResolved} setShowResolved={setShowResolved} />}
+              {panel === 'comments' && (
+                <CommentsPanel
+                  docId={doc.id}
+                  role={doc.role}
+                  focusId={params.get('comment')}
+                  onFocusAnchor={focusAnchor}
+                  showResolved={showResolved}
+                  setShowResolved={setShowResolved}
+                />
+              )}
               {panel === 'history' && <HistoryPanel docId={doc.id} current={content} canRestore={canEdit} onRestored={reloadFromServer} />}
             </div>
           )}
@@ -652,7 +732,9 @@ function DocEditor({ doc }: { doc: Doc }) {
           </div>
         </Modal>
       )}
-      {share && <ShareDialog type="document" id={doc.id} name={doc.name} publicToken={doc.publicToken} initialUser={share.user} onClose={() => setShare(null)} />}
+      {share && (
+        <ShareDialog type="document" id={doc.id} name={doc.name} publicToken={doc.publicToken} initialUser={share.user} onClose={() => setShare(null)} />
+      )}
       {ai && (
         <Modal title={ai.title} onClose={() => setAi(null)} wide>
           {ai.text == null ? (
@@ -681,4 +763,3 @@ function DocEditor({ doc }: { doc: Doc }) {
     </div>
   );
 }
-

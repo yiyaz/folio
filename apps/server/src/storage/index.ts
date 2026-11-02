@@ -33,8 +33,11 @@ export class NotFoundInStorage extends Error {
 }
 
 export const keys = {
-  doc: (ws: string, doc: string) => `workspaces/${ws}/docs/${doc}.md`,
-  revision: (ws: string, doc: string, v: number) => `workspaces/${ws}/revisions/${doc}/${v}.md`,
+  /**
+   * Immutable content blob. Every save writes a new blob and the database row is switched to it
+   * in the same transaction that bumps the version, so storage can never get ahead of the DB.
+   */
+  blob: (ws: string, doc: string, id: string) => `workspaces/${ws}/blobs/${doc}/${id}.md`,
   attachment: (ws: string, id: string) => `workspaces/${ws}/attachments/${id}`,
   avatar: (user: string) => `avatars/${user}`,
 };

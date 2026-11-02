@@ -44,7 +44,11 @@ test('write a document with live formatting and read mode', async ({ page }) => 
   await page.getByTestId('tb-bold').click();
   await waitSaved(page);
 
-  await page.getByTestId('mode-read').click();
+  // the view mode is a saved preference: wait until it is stored, since the test reloads below
+  await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith('/api/users/me') && r.request().method() === 'PATCH' && r.ok()),
+    page.getByTestId('mode-read').click(),
+  ]);
   await expect(page.getByTestId('preview').locator('h1')).toHaveText('Design');
   await expect(page.getByTestId('preview').locator('strong').first()).toHaveText('fast');
   await expect(page.getByTestId('preview').locator('a.tag')).toHaveText('#product');
@@ -247,7 +251,10 @@ test('folders, drag and drop, trash and restore', async ({ page }) => {
   await page.getByTestId('prompt-ok').click();
   await expect(page.getByTestId('folder-Projects')).toBeVisible();
   await treeDoc(page, 'Slash test').dragTo(page.getByTestId('folder-Projects'));
-  await page.getByTestId('folder-Projects').getByRole('button', { name: /Expand/ }).click();
+  await page
+    .getByTestId('folder-Projects')
+    .getByRole('button', { name: /Expand/ })
+    .click();
   await expect(page.locator('.tree li li').getByRole('link', { name: 'Slash test', exact: true })).toBeVisible();
 
   await treeDoc(page, 'Slash test').click();
@@ -269,11 +276,35 @@ test('settings: API token and vim keybindings', async ({ page }) => {
   await page.getByTestId('keymap-select').selectOption('vim');
   await treeDoc(page, 'Architecture').click();
   await page.locator('.cm-content').click();
-  await expect(page.locator('.cm-fat-cursor, .cm-vimMode')).toHaveCount(1, { timeout: 10_000 }).catch(async () => {
-    await expect(page.locator('.cm-editor')).toHaveClass(/cm-vimMode|cm-focused/);
-  });
+  await expect(page.locator('.cm-fat-cursor, .cm-vimMode'))
+    .toHaveCount(1, { timeout: 10_000 })
+    .catch(async () => {
+      await expect(page.locator('.cm-editor')).toHaveClass(/cm-vimMode|cm-focused/);
+    });
   await page.goto('/settings');
   await page.getByTestId('keymap-select').selectOption('default');
+});
+
+test('autosave retries after a network failure without losing the edit', async ({ page }) => {
+  await login(page, 'alice');
+  await createDoc(page, 'Flaky network');
+  let failures = 0;
+  await page.route('**/api/documents/*/content', async (route) => {
+    if (failures < 2) {
+      failures++;
+      return route.abort('internetdisconnected');
+    }
+    return route.continue();
+  });
+  await typeAtEnd(page, '\nwritten while offline');
+  await expect(page.locator('.toast')).toContainText('Retrying automatically');
+  await waitSaved(page);
+  expect(failures).toBe(2);
+  await page.unroute('**/api/documents/*/content');
+  await page.reload();
+  await page.getByTestId('mode-source').click();
+  await expect(page.locator('.cm-content')).toContainText('written while offline');
+  await page.getByTestId('mode-live').click();
 });
 
 test('mobile layout hides the sidebar behind a menu button', async ({ browser }) => {

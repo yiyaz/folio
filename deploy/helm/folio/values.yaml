@@ -74,7 +74,7 @@ storage:
   s3:
     bucket: folio
     region: us-east-1
-    endpoint: '' # set for MinIO / non-AWS S3
+    endpoint: '' # set for S3-compatible services (R2, Ceph, Garage, ...)
     forcePathStyle: true
   fs:
     size: 10Gi
@@ -153,7 +153,8 @@ networkPolicy:
   ingressNamespace: ingress-nginx
 
 # ---- optional in-cluster dependencies for small installs / evaluation ----
-# For production use a managed Postgres and S3 (or the Bitnami/official charts).
+# For production use a managed Postgres and S3. For evaluation without S3, use
+# storage.driver=fs with replicaCount=1 and autoscaling.enabled=false.
 postgresql:
   enabled: false
   image: postgres:16-alpine
@@ -161,12 +162,4 @@ postgresql:
   username: folio
   password: '' # generated if empty
   storage: 10Gi
-  storageClass: ''
-
-minio:
-  enabled: false
-  image: minio/minio:latest
-  rootUser: folio
-  rootPassword: '' # generated if empty
-  storage: 20Gi
   storageClass: ''

@@ -8,9 +8,9 @@ then adjust who may sign up under Administration.
 Check the rollout:
   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "folio.fullname" . }}
   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "folio.fullname" . }} -c migrate
-{{- if or .Values.postgresql.enabled .Values.minio.enabled }}
+{{- if .Values.postgresql.enabled }}
 
-NOTE: the bundled PostgreSQL/MinIO are single-instance and meant for evaluation or small teams.
+NOTE: the bundled PostgreSQL is single-instance and meant for evaluation or small teams.
 Use managed services for production.
 {{- end }}
 {{- if and (not .Values.existingSecret) (not .Values.secrets.folioKeys) (eq .Values.keys.provider "local") }}

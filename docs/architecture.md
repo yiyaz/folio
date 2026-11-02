@@ -6,7 +6,7 @@ Browser (React + CodeMirror 6)
    ▼
 Folio container (Fastify, stateless, N replicas)
    ├── auth: sessions (HTTP-only cookie) · API tokens (Bearer) · OIDC · CSRF header check
-   ├── documents service ──► Storage driver ──► S3 / MinIO  or  local filesystem
+   ├── documents service ──► Storage driver ──► S3 (-compatible) or  local filesystem
    │      └─ on save: parse Markdown → links, tags, mentions, title, search text
    ├── sharing / access control (workspace roles + document/folder shares, inherited)
    ├── notifications (in-app + e-mail)        ├── git sync (git CLI, token via GIT_ASKPASS)

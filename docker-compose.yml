@@ -1,6 +1,10 @@
 # Local development / single-host deployment.
-#   docker compose up -d            # Postgres, MinIO, Mailpit and Folio on http://localhost:3000
-#   docker compose up -d db minio mailpit && pnpm dev   # run only the dependencies, app from source
+#   docker compose up -d                          # Postgres, Mailpit and Folio on http://localhost:3000
+#   docker compose up -d db mailpit && pnpm dev   # only the dependencies; run the app from source
+#
+# Documents are stored on a Docker volume (STORAGE_DRIVER=fs). Their readable copy is in the
+# volume's library/ folder, e.g.:  docker compose cp app:/data/storage/library ./folio-library
+# For S3-compatible storage (AWS S3, Cloudflare R2, ...), see docs/configuration.md.
 services:
   db:
     image: postgres:16-alpine
@@ -15,18 +19,9 @@ services:
       interval: 5s
       retries: 10
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address :9001
-    environment:
-      MINIO_ROOT_USER: folio
-      MINIO_ROOT_PASSWORD: folio-minio-secret
-    ports: ['9000:9000', '9001:9001']
-    volumes: [miniodata:/data]
-
   mailpit:
     image: axllent/mailpit:latest
-    ports: ['8025:8025', '1025:1025'] # web UI on http://localhost:8025
+    ports: ['8025:8025', '1025:1025'] # web UI on http://localhost:8025 shows sign-up and notification e-mails
 
   app:
     build:
@@ -35,20 +30,19 @@ services:
     image: folio:local
     depends_on:
       db: { condition: service_healthy }
-      minio: { condition: service_started }
     ports: ['3000:3000']
     environment:
       DATABASE_URL: postgres://folio:folio@db:5432/folio
       APP_SECRET: change-me-to-a-long-random-string-please
       PUBLIC_URL: http://localhost:3000
-      STORAGE_DRIVER: s3
-      S3_ENDPOINT: http://minio:9000
-      S3_BUCKET: folio
-      S3_ACCESS_KEY_ID: folio
-      S3_SECRET_ACCESS_KEY: folio-minio-secret
+      STORAGE_DRIVER: fs
+      STORAGE_FS_ROOT: /data/storage
       MAIL_TRANSPORT: smtp://mailpit:1025
       REQUIRE_EMAIL_VERIFICATION: 'true'
+      # optional: enable AI writing
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes: [folio-data:/data]
 
 volumes:
   pgdata:
-  miniodata:
+  folio-data:

@@ -57,10 +57,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default (include "folio.generated" (dict "ctx" . "secret" (printf "%s-postgresql" (include "folio.fullname" .)) "key" "password")) .Values.postgresql.password -}}
 {{- end -}}
 
-{{- define "folio.minioPassword" -}}
-{{- default (include "folio.generated" (dict "ctx" . "secret" (printf "%s-minio" (include "folio.fullname" .)) "key" "rootPassword")) .Values.minio.rootPassword -}}
-{{- end -}}
-
 {{/* Environment shared by the app container and the migration initContainer. */}}
 {{- define "folio.env" -}}
 - name: DATABASE_URL

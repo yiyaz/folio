@@ -35,7 +35,7 @@ export class S3Storage implements Storage {
     });
   }
 
-  /** Creates the bucket on first use if it doesn't exist (convenient for MinIO). */
+  /** Creates the bucket on first use if it doesn't exist (convenient for local S3-compatible servers). */
   private async ensureBucket() {
     if (this.bucketChecked) return;
     try {

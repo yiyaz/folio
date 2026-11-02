@@ -16,7 +16,9 @@ The image is a multi-stage build on `node:22-alpine`. It runs as the non-root `n
 
 ## Single host (docker compose)
 
-`docker compose up -d` starts Postgres, MinIO, Mailpit and Folio. Change `APP_SECRET`, the
+`docker compose up -d` starts Postgres, Mailpit and Folio. Documents are stored
+on the `folio-data` volume (filesystem driver); copy the readable library out with
+`docker compose cp app:/data/storage/library ./folio-library`. Change `APP_SECRET`, the
 passwords and `PUBLIC_URL` in `docker-compose.yml` before exposing it.
 
 ## Kubernetes (Helm)
@@ -48,8 +50,9 @@ What the chart sets up:
   Prometheus **ServiceMonitor** are optional.
 - **Secrets**: point `existingSecret` at your own Secret, or let the chart generate one
   (`APP_SECRET` is generated once and kept across upgrades).
-- **Evaluation mode**: `--set postgresql.enabled=true --set minio.enabled=true` runs
-  single-instance Postgres and MinIO in the cluster. Don't use this for production data.
+- **Evaluation mode**: `--set postgresql.enabled=true --set storage.driver=fs --set replicaCount=1
+--set autoscaling.enabled=false` runs a single-instance Postgres in the cluster and stores
+  documents on a persistent volume, so no S3 is needed. Don't use this for production data.
 - **Filesystem storage** (`storage.driver=fs`) needs a ReadWriteMany volume to run more than one
   replica. The chart refuses to render a configuration that would lose data.
 

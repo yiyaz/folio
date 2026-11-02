@@ -1,15 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/plugin.js';
-import { assertCan, assertUuid, folderAccess, workspaceRole, ACCESSIBLE_DOCS_CTE, can } from '../access.js';
+import { assertCan, assertUuid, folderAccess, workspaceRole, ACCESSIBLE_DOCS_CTE, can, visibleDocSql } from '../access.js';
 import { many, one, tx } from '../db.js';
 import { badRequest, conflict, forbidden, notFound } from '../errors.js';
 import { createWorkspace } from '../services/workspaces.js';
 import { exportWorkspaceFiles, importFiles, unzipMarkdown, zipFiles } from '../services/transfer.js';
 import { deleteDocumentPermanently } from '../services/documents.js';
+import { deleteWorkspaceLibrary, reconcileWorkspace, safely, workspaceDir, MANIFEST } from '../services/library.js';
 import { notify } from '../services/notifications.js';
 import { actorOf } from '../services/users.js';
-import { randomToken, sha256 } from '../crypto.js';
+import { randomToken, sha256 } from '../crypto/tokens.js';
 import { getSignupSettings } from '../auth/settings.js';
 
 const memberRole = z.enum(['viewer', 'commenter', 'editor', 'admin']);
@@ -46,7 +47,10 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     assertCan(await wsRole(u.id, id), 'manage');
     const { name } = z.object({ name: z.string().trim().min(1).max(100) }).parse(req.body);
-    return one(ctx.db, 'UPDATE workspaces SET name = $2 WHERE id = $1 RETURNING id, name', [id, name]);
+    const ws = await one(ctx.db, 'UPDATE workspaces SET name = $2 WHERE id = $1 RETURNING id, name', [id, name]);
+    // the library folder is named after the workspace
+    await safely(ctx, 'reconcile', () => reconcileWorkspace(ctx, id));
+    return ws;
   });
 
   app.delete('/api/workspaces/:id', async (req) => {
@@ -54,9 +58,11 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const role = await wsRole(u.id, id);
     if (role !== 'owner') throw role ? forbidden('Only the owner can delete a workspace') : notFound();
+    const ws = await one<{ id: string; name: string; library_dir: string | null }>(ctx.db, 'SELECT id, name, library_dir FROM workspaces WHERE id = $1', [id]);
     const docs = await many<{ id: string }>(ctx.db, 'SELECT id FROM documents WHERE workspace_id = $1', [id]);
     for (const d of docs) await deleteDocumentPermanently(ctx, d.id);
     await ctx.db.query('DELETE FROM workspaces WHERE id = $1', [id]);
+    if (ws) await safely(ctx, 'delete', () => deleteWorkspaceLibrary(ctx, ws));
     return { ok: true };
   });
 
@@ -68,8 +74,10 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       many(ctx.db, `SELECT id, parent_id AS "parentId", name FROM folders WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY lower(name)`, [id]),
       many(
         ctx.db,
-        `SELECT id, folder_id AS "folderId", name, COALESCE(title, name) AS title, updated_at AS "updatedAt" FROM documents WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY lower(name)`,
-        [id],
+        `SELECT d.id, d.folder_id AS "folderId", d.name, COALESCE(d.title, d.name) AS title, d.updated_at AS "updatedAt",
+           d.classification = 'restricted' AS restricted
+         FROM documents d WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND ${visibleDocSql('d', '$2')} ORDER BY lower(d.name)`,
+        [id, u.id],
       ),
     ]);
     return { folders, documents };
@@ -83,8 +91,9 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     if (role) {
       return many(
         ctx.db,
-        `SELECT id, name, COALESCE(title, name) AS title FROM documents WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY lower(name)`,
-        [id],
+        `SELECT d.id, d.name, COALESCE(d.title, d.name) AS title FROM documents d
+         WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND ${visibleDocSql('d', '$2')} ORDER BY lower(d.name)`,
+        [id, u.id],
       );
     }
     // shared-only users resolve links to documents they can read
@@ -103,8 +112,8 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     return many(
       ctx.db,
       `SELECT t.tag, count(*)::int AS count FROM doc_tags t JOIN documents d ON d.id = t.document_id
-       WHERE d.workspace_id = $1 AND d.deleted_at IS NULL GROUP BY t.tag ORDER BY count DESC, t.tag`,
-      [id],
+       WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND ${visibleDocSql('d', '$2')} GROUP BY t.tag ORDER BY count DESC, t.tag`,
+      [id, u.id],
     );
   });
 
@@ -115,8 +124,9 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const [documents, folders] = await Promise.all([
       many(
         ctx.db,
-        `SELECT id, name, folder_id AS "folderId", deleted_at AS "deletedAt" FROM documents WHERE workspace_id = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`,
-        [id],
+        `SELECT d.id, d.name, d.folder_id AS "folderId", d.deleted_at AS "deletedAt" FROM documents d
+         WHERE d.workspace_id = $1 AND d.deleted_at IS NOT NULL AND ${visibleDocSql('d', '$2')} ORDER BY d.deleted_at DESC`,
+        [id, u.id],
       ),
       many(
         ctx.db,
@@ -206,6 +216,46 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  /** Where this workspace's files live, for admins who need to locate or recover them. */
+  app.get('/api/workspaces/:id/storage', async (req) => {
+    const u = requireUser(req);
+    const { id } = req.params as { id: string };
+    assertCan(await wsRole(u.id, id), 'manage');
+    const ws = await one<{ id: string; name: string; library_synced_at: Date | null }>(
+      ctx.db,
+      'SELECT id, name, library_synced_at FROM workspaces WHERE id = $1',
+      [id],
+    );
+    const counts = await one<{ docs: number; restricted: number }>(
+      ctx.db,
+      `SELECT count(*)::int AS docs, count(*) FILTER (WHERE classification = 'restricted')::int AS restricted FROM documents WHERE workspace_id = $1 AND deleted_at IS NULL`,
+      [id],
+    );
+    const dir = workspaceDir(ws!);
+    return {
+      driver: ctx.cfg.STORAGE_DRIVER,
+      libraryEnabled: ctx.cfg.LIBRARY_ENABLED,
+      library: ctx.storage.locate(dir),
+      manifest: ctx.storage.locate(`${dir}${MANIFEST}`),
+      versions: ctx.storage.locate(`workspaces/${id}/blobs/`),
+      attachments: ctx.storage.locate(`workspaces/${id}/attachments/`),
+      lastReconciledAt: ws!.library_synced_at,
+      documents: counts!.docs,
+      restrictedDocuments: counts!.restricted,
+      keyProvider: ctx.keys.describe(),
+      // restricted documents depend on APP_SECRET staying unchanged until FOLIO_KEYS is set
+      keyWarning: ctx.keys.activeKekId === 'app-secret',
+    };
+  });
+
+  /** Rebuild this workspace's readable library now (normally automatic). */
+  app.post('/api/workspaces/:id/storage/reconcile', async (req) => {
+    const u = requireUser(req);
+    const { id } = req.params as { id: string };
+    assertCan(await wsRole(u.id, id), 'manage');
+    return reconcileWorkspace(ctx, id);
+  });
+
   // ---- export / import ----
   app.get('/api/workspaces/:id/export', async (req, reply) => {
     const u = requireUser(req);
@@ -287,8 +337,9 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     );
     const documents = await many(
       ctx.db,
-      `SELECT id, folder_id AS "folderId", name, COALESCE(title, name) AS title, updated_at AS "updatedAt" FROM documents WHERE folder_id = ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY lower(name)`,
-      [folders.map((f: any) => f.id)],
+      `SELECT d.id, d.folder_id AS "folderId", d.name, COALESCE(d.title, d.name) AS title, d.updated_at AS "updatedAt"
+       FROM documents d WHERE d.folder_id = ANY($1::uuid[]) AND d.deleted_at IS NULL AND ${visibleDocSql('d', '$2')} ORDER BY lower(d.name)`,
+      [folders.map((f: any) => f.id), u.id],
     );
     return { id, workspaceId: fa!.workspaceId, role: fa!.role, folders, documents };
   });
@@ -320,6 +371,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
         [id, body.name ?? null, body.parentId ?? null, body.parentId !== undefined],
       );
       await ctx.bus.publish({ type: 'tree-changed', workspaceId: fa!.workspaceId });
+      await safely(ctx, 'reconcile', () => reconcileWorkspace(ctx, fa!.workspaceId));
       return f;
     } catch (e: any) {
       if (e?.code === '23505') throw conflict('A folder with this name already exists here');
@@ -345,6 +397,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       await c.query('UPDATE links SET target_id = NULL WHERE target_id = ANY($1::uuid[])', [docs.rows.map((r) => r.id)]);
     });
     await ctx.bus.publish({ type: 'tree-changed', workspaceId: fa!.workspaceId });
+    await safely(ctx, 'reconcile', () => reconcileWorkspace(ctx, fa!.workspaceId));
     return { ok: true };
   });
 
@@ -382,6 +435,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       throw e;
     }
     await ctx.bus.publish({ type: 'tree-changed', workspaceId: fa!.workspaceId });
+    await safely(ctx, 'reconcile', () => reconcileWorkspace(ctx, fa!.workspaceId));
     return { ok: true };
   });
 

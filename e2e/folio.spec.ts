@@ -315,6 +315,57 @@ test('mobile layout hides the sidebar behind a menu button', async ({ browser })
   await ctx.close();
 });
 
+test('restricted documents: only listed people can open them, with an access log', async ({ page, browser }) => {
+  await login(page, 'alice');
+  const ws = (await (await page.request.get('/api/workspaces')).json())[0];
+  const api = (method: 'post' | 'put', url: string, data: object) => page.request[method](url, { headers: { 'x-requested-with': 'folio' }, data });
+  await api('post', `/api/workspaces/${ws.id}/members`, { user: 'bob', role: 'admin' });
+  await createDoc(page, 'Payroll');
+  await typeAtEnd(page, '\nsalary bands: confidential');
+  await waitSaved(page);
+  const url = page.url();
+
+  // before: a workspace admin can open it
+  const { ctx, page: bob } = await newContext(browser, 'bob');
+  await bob.goto(url);
+  await expect(bob.getByTestId('doc-name')).toHaveValue('Payroll');
+
+  // restrict it
+  await page.getByTestId('share-btn').click();
+  await page.getByTestId('restrict').click();
+  await page.getByTestId('confirm-ok').click();
+  await expect(page.getByTestId('restricted-box')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('restricted-badge')).toBeVisible();
+  await expect(page.locator('.tree').getByRole('link', { name: 'Payroll (restricted)' })).toContainText('🔒');
+
+  // the workspace admin loses access and no longer sees it
+  await bob.goto(url);
+  await expect(bob.getByText('Document not found')).toBeVisible();
+  await expect(bob.locator('.tree').getByRole('link', { name: /^Payroll/ })).toHaveCount(0);
+
+  // grant bob explicitly
+  await page.getByTestId('restricted-badge').click();
+  await page.getByTestId('share-user').fill('bob');
+  await page.getByTestId('share-role').selectOption('viewer');
+  await page.getByTestId('share-submit').click();
+  await expect(page.locator('.perm-list')).toContainText('Bob');
+  await bob.goto(url);
+  await expect(bob.getByTestId('restricted-badge')).toBeVisible();
+  await expect(bob.locator('.cm-content')).toContainText('salary bands');
+
+  // the owner sees who opened it
+  await page.getByTestId('show-audit').click();
+  await expect(page.getByTestId('audit-log')).toContainText('Bob opened the document');
+  await page.keyboard.press('Escape');
+  await ctx.close();
+
+  // admins can see where files live
+  await page.goto(`/workspace/${ws.id}`);
+  await expect(page.getByTestId('storage-card')).toContainText('library');
+  await expect(page.getByTestId('storage-card')).toContainText('1 restricted');
+});
+
 test('admin can restrict sign-up to invitations', async ({ page, browser }) => {
   await login(page, 'alice');
   await page.goto('/admin');

@@ -5,7 +5,7 @@ import { publicMe } from '../auth/routes.js';
 import { getSignupSettings, setSignupSettings } from '../auth/settings.js';
 import { many, one } from '../db.js';
 import { keys, NotFoundInStorage } from '../storage/index.js';
-import { randomToken, sha256 } from '../crypto.js';
+import { randomToken, sha256 } from '../crypto/tokens.js';
 import { badRequest, notFound } from '../errors.js';
 import { USER_COLUMNS, toAuthUser, type UserRow } from '../services/users.js';
 

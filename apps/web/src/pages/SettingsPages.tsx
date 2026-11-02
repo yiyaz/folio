@@ -349,6 +349,8 @@ export function WorkspaceSettingsPage() {
         </ul>
       </section>
 
+      {isAdmin && <StorageCard wsId={wsId} />}
+
       <section className="card">
         <h2>Import & export</h2>
         <p className="muted small">Export everything as plain Markdown files, or import .md files / a .zip of a folder (e.g. an Obsidian vault).</p>
@@ -662,5 +664,87 @@ export function AdminPage() {
         </table>
       </section>
     </div>
+  );
+}
+
+interface StorageInfo {
+  driver: 'fs' | 's3';
+  libraryEnabled: boolean;
+  library: string;
+  manifest: string;
+  versions: string;
+  attachments: string;
+  lastReconciledAt: string | null;
+  documents: number;
+  restrictedDocuments: number;
+  keyProvider: string;
+  keyWarning: boolean;
+}
+
+/** Shows admins exactly where this workspace's files live, so they can be found without the app. */
+function StorageCard({ wsId }: { wsId: string }) {
+  const toast = useToast();
+  const { data, refetch } = useQuery({ queryKey: ['storage', wsId], queryFn: () => get<StorageInfo>(`/api/workspaces/${wsId}/storage`) });
+  const [busy, setBusy] = useState(false);
+  if (!data) return null;
+  const copy = (s: string) => navigator.clipboard?.writeText(s).then(() => toast('Copied', 'success'));
+  const Row = ({ label, value, hint }: { label: string; value: string; hint: string }) => (
+    <div className="storage-row">
+      <div>
+        <strong>{label}</strong>
+        <div className="muted small">{hint}</div>
+      </div>
+      <code>{value}</code>
+      <button className="btn btn-small" onClick={() => copy(value)} aria-label={`Copy ${label} location`}>
+        Copy
+      </button>
+    </div>
+  );
+  return (
+    <section className="card" data-testid="storage-card">
+      <h2>Where your files are stored</h2>
+      <p className="muted small">
+        {data.driver === 's3' ? 'Object storage (S3-compatible).' : 'Local disk of the server.'} Every document also exists as a plain Markdown file you can
+        open, copy or back up without Folio.
+      </p>
+      {data.libraryEnabled && (
+        <>
+          <Row label="Readable library" value={data.library} hint="Latest version of every document, as folders and .md files" />
+          <Row label="Manifest" value={data.manifest} hint="Index of the library: ids, names and paths" />
+        </>
+      )}
+      <Row label="Version history" value={data.versions} hint="Every saved version (used by the app)" />
+      <Row label="Attachments" value={data.attachments} hint="Uploaded images and files" />
+      <p className="muted small">
+        {data.documents} documents{data.restrictedDocuments ? `, ${data.restrictedDocuments} restricted (stored encrypted as .md.folio-encrypted)` : ''}. Keys:{' '}
+        {data.keyProvider}. Last full check: {data.lastReconciledAt ? timeAgo(data.lastReconciledAt) : 'not yet'}.
+      </p>
+      {data.keyWarning && (
+        <p className="alert alert-error small" data-testid="key-warning">
+          Restricted documents are encrypted with a key derived from APP_SECRET. Ask your administrator to set FOLIO_KEYS (and back it up): changing APP_SECRET
+          would make restricted documents unreadable.
+        </p>
+      )}
+      {data.libraryEnabled && (
+        <button
+          className="btn btn-small"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const r = await post<{ synced: number; removed: number }>(`/api/workspaces/${wsId}/storage/reconcile`, {});
+              toast(`Library checked: ${r.synced} file(s) updated, ${r.removed} stray file(s) removed`, 'success');
+              void refetch();
+            } catch (e) {
+              toast(errMsg(e), 'error');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Check & repair library now
+        </button>
+      )}
+    </section>
   );
 }

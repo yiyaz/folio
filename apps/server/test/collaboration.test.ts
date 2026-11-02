@@ -19,9 +19,11 @@ function wsClient(url: string, cookie: string) {
     sock,
     opened: new Promise<void>((res, rej) => (sock.once('open', () => res()), sock.once('error', rej))),
     send: (m: unknown) => sock.send(JSON.stringify(m)),
-    waitFor: (pred: (m: any) => boolean, ms = 5000) =>
+    /** Number of messages received so far; pass to waitFor to ignore older ones. */
+    mark: () => messages.length,
+    waitFor: (pred: (m: any) => boolean, ms = 5000, from = 0) =>
       new Promise<any>((resolve, reject) => {
-        const hit = messages.find(pred);
+        const hit = messages.slice(from).find(pred);
         if (hit) return resolve(hit);
         waiters.push({ pred, resolve });
         setTimeout(() => reject(new Error('timed out waiting for websocket message')), ms);
@@ -147,8 +149,9 @@ describe('realtime websocket', () => {
     await bob.post(`/api/documents/${d.id}/comments`, { body: 'hi' });
     await a.waitFor((m) => m.type === 'comments-changed' && m.docId === d.id);
 
+    const since = a.mark();
     b.sock.close();
-    const after = await a.waitFor((m) => m.type === 'presence' && m.users.length === 1);
+    const after = await a.waitFor((m) => m.type === 'presence' && m.users.length === 1, 5000, since);
     expect(after.users[0].username).toBe('wsalice');
     a.sock.close();
   });

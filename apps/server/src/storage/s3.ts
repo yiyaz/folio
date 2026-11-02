@@ -6,6 +6,7 @@ import {
   HeadObjectCommand,
   HeadBucketCommand,
   CreateBucketCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import type { Storage } from './index.js';
 import { NotFoundInStorage } from './index.js';
@@ -61,6 +62,22 @@ export class S3Storage implements Storage {
       if (e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404) throw new NotFoundInStorage(key);
       throw e;
     }
+  }
+
+  async list(prefix: string): Promise<string[]> {
+    await this.ensureBucket();
+    const keys: string[] = [];
+    let token: string | undefined;
+    do {
+      const r = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }));
+      for (const o of r.Contents ?? []) if (o.Key) keys.push(o.Key);
+      token = r.IsTruncated ? r.NextContinuationToken : undefined;
+    } while (token);
+    return keys.sort();
+  }
+
+  locate(key: string): string {
+    return `s3://${this.bucket}/${key}`;
   }
 
   async delete(key: string): Promise<void> {

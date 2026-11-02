@@ -218,8 +218,9 @@ export function FileTree({
             {...dragProps('doc', d.id)}
             title={d.title}
           >
-            <span aria-hidden="true">📄 </span>
+            <span aria-hidden="true">{d.restricted ? '🔒 ' : '📄 '}</span>
             {d.name}
+            {d.restricted && <span className="sr-only"> (restricted)</span>}
           </NavLink>
         </li>
       ))}

@@ -41,7 +41,9 @@ export async function exportWorkspaceFiles(ctx: AppContext, workspaceId: string,
   const paths = folderPaths(folders);
   let docs = await many<{ id: string; folder_id: string | null; name: string }>(
     ctx.db,
-    'SELECT id, folder_id, name FROM documents WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY name',
+    // restricted documents never leave Folio in bulk (zip exports, Git sync); they can be
+    // exported one at a time by people with access, which is audited
+    `SELECT id, folder_id, name FROM documents WHERE workspace_id = $1 AND deleted_at IS NULL AND classification = 'standard' ORDER BY name`,
     [workspaceId],
   );
   if (opts.docIds) {

@@ -1606,3 +1606,75 @@ textarea:focus {
     overflow: visible;
   }
 }
+
+/* ---- restricted documents & storage ---- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.restricted-badge {
+  margin-left: 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg));
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.restricted-box {
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: color-mix(in srgb, var(--danger) 6%, var(--bg));
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+.restricted-box p {
+  margin: 6px 0 10px;
+}
+.restrict-offer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 12px 0;
+}
+.audit-log {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+.audit-log li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.storage-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.storage-row code {
+  font-size: 0.8rem;
+  word-break: break-all;
+  background: var(--code-bg);
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+@media (max-width: 720px) {
+  .storage-row {
+    grid-template-columns: 1fr;
+  }
+}

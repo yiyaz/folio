@@ -5,6 +5,9 @@ import { assertCan, can, documentAccess, workspaceRole, UUID_RE } from '../acces
 import { one } from '../db.js';
 import { badRequest, notFound } from '../errors.js';
 import { keys } from '../storage/index.js';
+import { getDoc } from '../services/documents.js';
+import { isRestricted, protect, reveal } from '../services/restricted.js';
+import { audit } from '../services/audit.js';
 
 /** Upload allow-list. SVG and HTML are deliberately excluded (script injection). */
 export const ALLOWED_MIME: Record<string, string[]> = {
@@ -82,16 +85,34 @@ export async function registerAttachmentRoutes(app: FastifyInstance) {
     if (!sniffOk(mime, buf)) throw badRequest('File contents do not match its type');
     const id = randomUUID();
     const key = keys.attachment(workspaceId, id);
-    await ctx.storage.put(key, buf, mime);
+    // attachments of restricted documents are encrypted with the document's key
+    const owner = documentId ? await getDoc(ctx.db, documentId) : null;
+    const restricted = !!owner && isRestricted(owner);
+    await ctx.storage.put(key, owner ? await protect(ctx, owner, buf, 'attachment') : buf, restricted ? 'application/json' : mime);
     const filename = file.filename.replace(/[^\w.\- ()]+/g, '_').slice(0, 200) || 'file';
     await ctx.db.query(
-      'INSERT INTO attachments (id, workspace_id, document_id, filename, mime, size, storage_key, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-      [id, workspaceId, documentId, filename, mime, buf.length, key, u.id],
+      'INSERT INTO attachments (id, workspace_id, document_id, filename, mime, size, storage_key, created_by, encrypted) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+      [id, workspaceId, documentId, filename, mime, buf.length, key, u.id, restricted],
     );
     const url = `/api/attachments/${id}/${encodeURIComponent(filename)}`;
     const markdown = mime.startsWith('image/') ? `![${filename}](${url})` : `[${filename}](${url})`;
     return reply.code(201).send({ id, url, filename, mime, size: buf.length, markdown });
   });
+
+  /**
+   * Attachments of a restricted document follow the document's (deny-by-default) access;
+   * other attachments are readable by workspace members and by people who can read the document.
+   */
+  async function mayRead(userId: string | null, att: { workspace_id: string; document_id: string | null }): Promise<{ ok: boolean; restricted: boolean }> {
+    const docAccess = att.document_id && userId ? await documentAccess(ctx.db, userId, att.document_id) : null;
+    if (att.document_id) {
+      const doc = await one<{ classification: string }>(ctx.db, 'SELECT classification FROM documents WHERE id = $1', [att.document_id]);
+      if (doc?.classification === 'restricted') return { ok: can(docAccess?.role ?? null, 'read'), restricted: true };
+    }
+    if (!userId) return { ok: false, restricted: false };
+    if (can(await workspaceRole(ctx.db, userId, att.workspace_id), 'read')) return { ok: true, restricted: false };
+    return { ok: can(docAccess?.role ?? null, 'read'), restricted: false };
+  }
 
   const serve = async (req: any, reply: any) => {
     const { id } = req.params as { id: string };
@@ -103,17 +124,21 @@ export async function registerAttachmentRoutes(app: FastifyInstance) {
       [id],
     );
     if (!att) throw notFound();
-    let allowed = false;
-    if (req.user) {
-      if (can(await workspaceRole(ctx.db, req.user.id, att.workspace_id), 'read')) allowed = true;
-      else if (att.document_id) allowed = can((await documentAccess(ctx.db, req.user.id, att.document_id))?.role ?? null, 'read');
-    }
-    if (!allowed && p && att.document_id) {
+    const allowed = await mayRead(req.user?.id ?? null, att);
+    if (!allowed.ok && p && att.document_id && !allowed.restricted) {
       // attachments embedded in a publicly shared document
-      allowed = !!(await one(ctx.db, 'SELECT 1 FROM public_links WHERE token = $1 AND document_id = $2', [p, att.document_id]));
+      allowed.ok = !!(await one(ctx.db, 'SELECT 1 FROM public_links WHERE token = $1 AND document_id = $2', [p, att.document_id]));
     }
-    if (!allowed) throw notFound();
-    const buf = await ctx.storage.get(att.storage_key);
+    if (!allowed.ok) throw notFound();
+    const buf = att.document_id ? await reveal(ctx, att.document_id, await ctx.storage.get(att.storage_key)) : await ctx.storage.get(att.storage_key);
+    if (allowed.restricted)
+      await audit(ctx, req, {
+        action: 'attachment.view',
+        resourceType: 'attachment',
+        resourceId: id,
+        workspaceId: att.workspace_id,
+        details: { documentId: att.document_id },
+      });
     return reply
       .type(att.mime)
       .header('x-content-type-options', 'nosniff')
@@ -135,10 +160,7 @@ export async function registerAttachmentRoutes(app: FastifyInstance) {
       [id],
     );
     if (!att) throw notFound();
-    const ok =
-      can(await workspaceRole(ctx.db, u.id, att.workspace_id), 'read') ||
-      (att.document_id && can((await documentAccess(ctx.db, u.id, att.document_id))?.role ?? null, 'read'));
-    if (!ok) throw notFound();
+    if (!(await mayRead(u.id, att)).ok) throw notFound();
     return { id, filename: att.filename, mime: att.mime, size: att.size, workspaceId: att.workspace_id, documentId: att.document_id };
   });
 }

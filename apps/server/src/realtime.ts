@@ -172,12 +172,14 @@ export async function registerRealtime(app: FastifyInstance) {
           const access = await documentAccess(db, conn.userId, msg.docId);
           if (!access || !can(access.role, 'read')) return send(conn, { type: 'error', error: 'forbidden' });
           if (conn.docId && conn.docId !== msg.docId) await leave(conn);
-          conn.docId = msg.docId;
           await db.query(
             `INSERT INTO presence (conn_id, document_id, user_id, replica_id) VALUES ($1, $2, $3, $4)
              ON CONFLICT (conn_id) DO UPDATE SET document_id = EXCLUDED.document_id, last_seen = now()`,
             [conn.id, msg.docId, conn.userId, bus.replicaId],
           );
+          // only start receiving this document's presence once our own row exists, so a
+          // presence list sent to us always includes us
+          conn.docId = msg.docId;
           await bus.publish({ type: 'presence-changed', docId: msg.docId });
         } else if (msg.type === 'leave') {
           await leave(conn);

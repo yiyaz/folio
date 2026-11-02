@@ -52,9 +52,21 @@ secrets:
   jiraEmail: ''
   jiraToken: ''
   anthropicApiKey: '' # enables optional AI assist
+  # Key-encryption keys for restricted documents ("id:base64key,…", first is active).
+  # Generate: node dist/admin-cli.js keys:generate. Back these up separately from the data!
+  folioKeys: ''
+  vaultToken: '' # when keys.provider=vault
+
+keys:
+  provider: local # local (secrets.folioKeys) | vault
+  vault:
+    addr: '' # e.g. https://vault.example.com
+    transitKey: folio
 
 storage:
   driver: s3 # s3 (recommended, scales horizontally) | fs (single replica or RWX volume)
+  prefix: '' # optional sub-path, e.g. folio/prod
+  library: true # keep the human-readable library/ copy
   s3:
     bucket: folio
     region: us-east-1

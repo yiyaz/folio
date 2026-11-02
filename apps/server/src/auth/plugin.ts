@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { sha256 } from '../crypto.js';
+import { sha256 } from '../crypto/tokens.js';
 import { one } from '../db.js';
 import { HttpError, unauthorized } from '../errors.js';
 import { USER_COLUMNS, toAuthUser, type UserRow } from '../services/users.js';

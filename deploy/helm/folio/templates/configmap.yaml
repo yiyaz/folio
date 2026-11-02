@@ -24,6 +24,11 @@ data:
   OIDC_CLIENT_ID: {{ .Values.config.oidc.clientId | quote }}
   OIDC_NAME: {{ .Values.config.oidc.name | quote }}
   STORAGE_DRIVER: {{ .Values.storage.driver | quote }}
+  STORAGE_PREFIX: {{ .Values.storage.prefix | quote }}
+  LIBRARY_ENABLED: {{ .Values.storage.library | quote }}
+  KEY_PROVIDER: {{ .Values.keys.provider | quote }}
+  VAULT_ADDR: {{ .Values.keys.vault.addr | quote }}
+  VAULT_TRANSIT_KEY: {{ .Values.keys.vault.transitKey | quote }}
   {{- if eq .Values.storage.driver "s3" }}
   S3_BUCKET: {{ .Values.storage.s3.bucket | quote }}
   S3_REGION: {{ .Values.storage.s3.region | quote }}

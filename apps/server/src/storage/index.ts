@@ -8,11 +8,20 @@ export interface Storage {
   get(key: string): Promise<Buffer>;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
+  /** All keys below a prefix (recursive). */
+  list(prefix: string): Promise<string[]>;
+  /** Human-readable location of a key, e.g. s3://bucket/key or an absolute path. */
+  locate(key: string): string;
   /** Health check used by /readyz. */
   ping(): Promise<void>;
 }
 
 export function createStorage(cfg: Config): Storage {
+  const base = createDriver(cfg);
+  return cfg.STORAGE_PREFIX ? new PrefixedStorage(base, cfg.STORAGE_PREFIX) : base;
+}
+
+function createDriver(cfg: Config): Storage {
   if (cfg.STORAGE_DRIVER === 's3') {
     return new S3Storage({
       bucket: cfg.S3_BUCKET,
@@ -41,3 +50,39 @@ export const keys = {
   attachment: (ws: string, id: string) => `workspaces/${ws}/attachments/${id}`,
   avatar: (user: string) => `avatars/${user}`,
 };
+
+/**
+ * Places every key under a fixed prefix (e.g. "folio/prod/"), so several deployments can share a
+ * bucket. Keys stored in the database are always unprefixed.
+ */
+export class PrefixedStorage implements Storage {
+  private prefix: string;
+  constructor(
+    private inner: Storage,
+    prefix: string,
+  ) {
+    this.prefix = prefix.replace(/^\/+|\/+$/g, '') + '/';
+    if (this.prefix.split('/').some((s) => s === '..')) throw new Error('STORAGE_PREFIX must not contain ".."');
+  }
+  put(key: string, body: Buffer | string, contentType?: string) {
+    return this.inner.put(this.prefix + key, body, contentType);
+  }
+  get(key: string) {
+    return this.inner.get(this.prefix + key);
+  }
+  delete(key: string) {
+    return this.inner.delete(this.prefix + key);
+  }
+  exists(key: string) {
+    return this.inner.exists(this.prefix + key);
+  }
+  async list(prefix: string) {
+    return (await this.inner.list(this.prefix + prefix)).map((k) => k.slice(this.prefix.length));
+  }
+  locate(key: string) {
+    return this.inner.locate(this.prefix + key);
+  }
+  ping() {
+    return this.inner.ping();
+  }
+}

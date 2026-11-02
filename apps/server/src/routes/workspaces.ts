@@ -91,7 +91,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     if (role) {
       return many(
         ctx.db,
-        `SELECT d.id, d.name, COALESCE(d.title, d.name) AS title FROM documents d
+        `SELECT d.id, d.name, COALESCE(d.title, d.name) AS title, d.classification = 'restricted' AS restricted FROM documents d
          WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND ${visibleDocSql('d', '$2')} ORDER BY lower(d.name)`,
         [id, u.id],
       );
@@ -99,7 +99,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     // shared-only users resolve links to documents they can read
     return many(
       ctx.db,
-      `WITH RECURSIVE ${ACCESSIBLE_DOCS_CTE} SELECT d.id, d.name, COALESCE(d.title, d.name) AS title FROM documents d
+      `WITH RECURSIVE ${ACCESSIBLE_DOCS_CTE} SELECT d.id, d.name, COALESCE(d.title, d.name) AS title, d.classification = 'restricted' AS restricted FROM documents d
        WHERE d.workspace_id = $2 AND d.deleted_at IS NULL AND d.id IN (SELECT id FROM acc) ORDER BY lower(d.name)`,
       [u.id, id],
     );

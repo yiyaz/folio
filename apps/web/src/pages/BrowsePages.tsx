@@ -9,6 +9,8 @@ import { Avatar, EmptyState, Spinner, useToast } from '../components/ui';
 import { useDialogs } from '../components/dialogs';
 import { PageTitle } from '../components/Layout';
 import { Preview } from '../render/Preview';
+import { toSpans, type Authorship } from '@folio/markdown';
+import type { AuthorMeta } from '../authorship';
 import { can } from '../roles';
 import { errMsg, timeAgo } from '../util';
 import type { PublicUser, Tree } from '../types';
@@ -347,7 +349,7 @@ export function PublicDocPage() {
   const { token = '' } = useParams();
   const { data, error, isLoading } = useQuery({
     queryKey: ['public', token],
-    queryFn: () => get<{ title: string; content: string; updatedAt: string }>(`/api/public/${token}`),
+    queryFn: () => get<{ title: string; content: string; updatedAt: string; authorship: Authorship; authorMeta: AuthorMeta }>(`/api/public/${token}`),
     retry: false,
   });
   useEffect(() => {
@@ -359,9 +361,14 @@ export function PublicDocPage() {
     <div className="public-page">
       <header className="public-head">
         <span className="muted small">Shared via Folio · updated {timeAgo(data.updatedAt)}</span>
+        {data.authorship?.authors.some((a) => a.kind === 'ai') && (
+          <span className="muted small public-legend">
+            · <span className="auth-ai">Shaded text</span> was written by AI
+          </span>
+        )}
       </header>
       <article className="public-article">
-        <Preview source={data.content} publicToken={token} />
+        <Preview source={data.content} publicToken={token} authorship={{ spans: toSpans(data.authorship), mode: 'ai', meta: data.authorMeta }} />
       </article>
     </div>
   );

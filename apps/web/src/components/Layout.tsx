@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { ErrorBoundary } from './ErrorBoundary';
 import { useQueryClient } from '@tanstack/react-query';
 import { post, patch } from '../api';
-import { useAuth } from '../auth';
+import { useAuth, useClientConfig } from '../auth';
 import { useWorkspace } from '../workspace';
 import { useTree } from '../hooks';
 import { realtime } from '../realtime';
@@ -12,6 +12,7 @@ import { NotificationBell } from './NotificationBell';
 import { Palette, type PaletteItem } from './Palette';
 import { ShareDialog } from './ShareDialog';
 import { TemplatePicker } from './TemplatePicker';
+import { AiDialog } from './AiDialog';
 import { Avatar, Menu, useToast } from './ui';
 import { useDialogs } from './dialogs';
 import { can } from '../roles';
@@ -36,6 +37,8 @@ export function Layout() {
   const [palette, setPalette] = useState<'switcher' | 'commands' | null>(null);
   const [shareFolder, setShareFolder] = useState<TreeFolder | null>(null);
   const [templateFolder, setTemplateFolder] = useState<string | null | undefined>(undefined);
+  const [aiNew, setAiNew] = useState(false);
+  const config = useClientConfig();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const registry = useRef(new Map<string, PaletteItem[]>());
   const [, force] = useState(0);
@@ -130,6 +133,7 @@ export function Layout() {
         },
       })),
     ];
+    if (current && canEdit && config?.ai) base.push({ id: 'ai-new', label: 'Write a new document with AI…', run: () => setAiNew(true) });
     if (current && canEdit) {
       base.push(
         { id: 'new-doc-template', label: 'New document from template…', run: () => setTemplateFolder(null) },
@@ -180,6 +184,11 @@ export function Layout() {
           {current && canEdit && (
             <button className="btn btn-small template-btn" onClick={() => setTemplateFolder(null)} data-testid="new-from-template">
               ＋ New from template
+            </button>
+          )}
+          {current && canEdit && config?.ai && (
+            <button className="btn btn-small template-btn" onClick={() => setAiNew(true)} data-testid="new-with-ai">
+              ✨ Write with AI
             </button>
           )}
           {current && tree && (
@@ -247,6 +256,7 @@ export function Layout() {
       )}
       {palette === 'commands' && <Palette title="Commands" placeholder="Type a command…" items={commandItems} onClose={() => setPalette(null)} />}
       {shareFolder && <ShareDialog type="folder" id={shareFolder.id} name={shareFolder.name} onClose={() => setShareFolder(null)} />}
+      {aiNew && current && <AiDialog workspaceId={current.id} mode="new" onClose={() => setAiNew(false)} />}
       {templateFolder !== undefined && current && (
         <TemplatePicker workspaceId={current.id} folderId={templateFolder} onClose={() => setTemplateFolder(undefined)} />
       )}

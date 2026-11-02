@@ -11,11 +11,20 @@ import { tags as t } from '@lezer/highlight';
 import { livePreview, refreshDecorations, commentHighlights, setCommentRanges, type LivePreviewHooks, type CommentRange } from './livePreview';
 import { folioCompletions, type CompletionData } from './completions';
 import { formattingKeymap } from './commands';
+import { aiClaims, authorshipExtension, authorshipField, insertedBy, refreshAuthorship, setAuthorship, setLocalAuthor } from './authorship';
+import { emptyMeta, type AuthorMeta, type AuthorshipMode } from '../authorship';
+import type { Author, Span } from '@folio/markdown';
 import { Frontmatter } from './frontmatter';
 
 export interface EditorHandle {
   view: EditorView | null;
-  setContent: (text: string) => void;
+  /** Replace the content; pass its attribution when it comes from the server. */
+  setContent: (text: string, spans?: Span[]) => void;
+  setAuthorship: (spans: Span[]) => void;
+  /** AI-written ranges of the current content, to send with a save. */
+  aiClaims: () => { from: number; to: number; generationId: string }[];
+  /** Insert AI-generated Markdown at the cursor, attributed to that generation. */
+  insertAi: (text: string, author: Author) => void;
   getContent: () => string;
   refresh: () => void;
   setComments: (ranges: CommentRange[]) => void;
@@ -35,6 +44,11 @@ export interface EditorProps {
   onSelection?: (sel: { from: number; to: number; text: string } | null) => void;
   onUpload?: (file: File) => Promise<string>;
   onScroll?: (ratio: number) => void;
+  initialAuthorship?: Span[];
+  localAuthor?: Author | null;
+  authorshipMode?: AuthorshipMode;
+  authorMeta?: AuthorMeta;
+  onAuthorshipChange?: (spans: Span[]) => void;
 }
 
 const markdownHighlight = HighlightStyle.define([
@@ -106,7 +120,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         c.ro.of([EditorState.readOnly.of(props.readOnly), EditorView.editable.of(!props.readOnly)]),
         c.lines.of(props.showLineNumbers ? lineNumbers() : []),
         commentHighlights,
+        authorshipExtension({
+          localAuthor: () => propsRef.current.localAuthor ?? null,
+          mode: () => propsRef.current.authorshipMode ?? 'off',
+          meta: () => propsRef.current.authorMeta ?? emptyMeta,
+        }),
         EditorView.updateListener.of((u) => {
+          if (u.startState.field(authorshipField) !== u.state.field(authorshipField)) propsRef.current.onAuthorshipChange?.(u.state.field(authorshipField));
           if (u.docChanged && !applyingExternal.current) propsRef.current.onChange(u.state.doc.toString());
           if (u.selectionSet || u.docChanged) {
             const r = u.state.selection.main;
@@ -156,6 +176,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     }
     const view = new EditorView({ state, parent: host.current! });
     viewRef.current = view;
+    view.dispatch({ effects: [setLocalAuthor.of(props.localAuthor ?? null), setAuthorship.of(props.initialAuthorship ?? [])] });
     return () => {
       view.destroy();
       viewRef.current = null;
@@ -184,6 +205,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   }, [props.showLineNumbers]);
 
   useEffect(() => {
+    viewRef.current?.dispatch({ effects: refreshAuthorship.of(null) });
+  }, [props.authorshipMode, props.authorMeta]);
+
+  useEffect(() => {
     let cancelled = false;
     void keymapExtension(props.keymapMode).then((ext) => {
       if (!cancelled) viewRef.current?.dispatch({ effects: comps.current.keys.reconfigure(ext) });
@@ -197,13 +222,39 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     get view() {
       return viewRef.current;
     },
-    setContent(text: string) {
+    setContent(text: string, spans?: Span[]) {
       const v = viewRef.current;
-      if (!v || v.state.doc.toString() === text) return;
+      if (!v) return;
+      const effects = spans ? [setAuthorship.of(spans)] : [];
+      if (v.state.doc.toString() === text) {
+        if (spans) v.dispatch({ effects });
+        return;
+      }
       applyingExternal.current = true;
       const head = Math.min(v.state.selection.main.head, text.length);
-      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text }, selection: { anchor: head } });
+      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text }, selection: { anchor: head }, effects });
       applyingExternal.current = false;
+    },
+    setAuthorship: (spans) => viewRef.current?.dispatch({ effects: setAuthorship.of(spans) }),
+    aiClaims: () => (viewRef.current ? aiClaims(viewRef.current.state.field(authorshipField)) : []),
+    insertAi(text: string, author: Author) {
+      const v = viewRef.current;
+      if (!v) return;
+      const { state } = v;
+      const line = state.doc.lineAt(state.selection.main.head);
+      const atEmpty = line.text.trim() === '';
+      const at = atEmpty ? line.from : line.to;
+      const before = atEmpty ? '' : '\n\n';
+      const body = text.replace(/\s+$/, '');
+      // only the generated text is AI-written; the separating newlines are not attributed to it
+      v.dispatch({ changes: { from: at, to: atEmpty ? line.to : at, insert: before }, scrollIntoView: true });
+      v.dispatch({
+        changes: { from: at + before.length, insert: body },
+        selection: { anchor: at + before.length + body.length },
+        annotations: insertedBy.of(author),
+        scrollIntoView: true,
+      });
+      v.focus();
     },
     getContent: () => viewRef.current?.state.doc.toString() ?? '',
     refresh: () => viewRef.current?.dispatch({ effects: refreshDecorations.of(null) }),

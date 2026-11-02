@@ -31,12 +31,15 @@ import { migrate } from './migrate.js';
 import { runMaintenance } from './services/maintenance.js';
 import { createKeyProvider, KeyError, type KeyProvider } from './crypto/keys.js';
 import { reconcileAllLibraries } from './services/library.js';
+import { createProvider, type LlmProvider } from './ai/provider.js';
 
 export interface BuildOptions {
   storage?: Storage;
   mailer?: Mailer;
   fetchImpl?: typeof fetch;
   keys?: KeyProvider;
+  /** Override the language model (tests); null disables AI. */
+  ai?: LlmProvider | null;
   runMigrations?: boolean;
   logger?: boolean | object;
 }
@@ -68,6 +71,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
     bus,
     secrets: new SecretBox(cfg.APP_SECRET),
     keys: opts.keys ?? createKeyProvider(cfg),
+    ai: opts.ai !== undefined ? opts.ai : createProvider(cfg),
     log: app.log,
   };
   app.decorate('ctx', ctx);
@@ -162,7 +166,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
     plantumlServer: cfg.PLANTUML_SERVER || null,
     pyodideUrl: cfg.PYODIDE_URL,
     embedPatterns: embedPatterns(cfg),
-    ai: !!cfg.ANTHROPIC_API_KEY,
+    ai: !!ctx.ai,
     maxUploadMb: cfg.MAX_UPLOAD_MB,
   }));
 

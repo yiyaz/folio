@@ -10,6 +10,8 @@ import { useDialogs } from './dialogs';
 import { can } from '../roles';
 import { errMsg, timeAgo } from '../util';
 import { useAuth } from '../auth';
+import { authorKey, type Span } from '@folio/markdown';
+import { authorHue, shares, type AuthorMeta, type AuthorshipMode } from '../authorship';
 
 export function OutlinePanel({ content, onJump }: { content: string; onJump: (line: number, slug: string) => void }) {
   const headings = useMemo(() => parseDocument(content).headings, [content]);
@@ -289,6 +291,90 @@ export function HistoryPanel({ docId, current, canRestore, onRestored }: { docId
           </pre>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Who wrote this document: contributors' shares and where AI-written text came from. */
+export function AuthorsPanel({ spans, meta, mode, setMode }: { spans: Span[]; meta: AuthorMeta; mode: AuthorshipMode; setMode: (m: AuthorshipMode) => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const rows = shares(spans);
+  const { data: gen } = useQuery({
+    queryKey: ['generation', open],
+    queryFn: () =>
+      get<{
+        prompt: string;
+        model: string;
+        context: { id: string; name: string }[];
+        omitted: { name: string | null; reason: string }[];
+        createdAt: string;
+        requestedByName: string | null;
+      }>(`/api/ai/generations/${open}`),
+    enabled: !!open,
+  });
+  if (!rows.length) return <p className="muted small pad">No text yet.</p>;
+  const aiShare = rows.filter((r) => r.author.kind === 'ai').reduce((n, r) => n + r.share, 0);
+  return (
+    <div className="authors-panel" data-testid="authors-panel">
+      <div className="authors-bar" aria-hidden="true">
+        {rows.map((r) => (
+          <span key={authorKey(r.author)} style={{ width: `${r.share * 100}%`, background: `hsl(${authorHue(r.author)} 65% 60%)` }} />
+        ))}
+      </div>
+      <p className="small muted">
+        {Math.round(aiShare * 100)}% written by AI · {Math.round((1 - aiShare) * 100)}% by people
+      </p>
+      <ul className="authors-list">
+        {rows.map((r) => {
+          const k = authorKey(r.author);
+          const genId = r.author.kind === 'ai' ? r.author.generationId : null;
+          const label =
+            r.author.kind === 'ai'
+              ? `AI (${meta.generations[r.author.generationId]?.model ?? r.author.model})`
+              : r.author.id === 'human'
+                ? 'People'
+                : (meta.people[r.author.id]?.displayName ?? 'A coworker');
+          return (
+            <li key={k}>
+              <span className="swatch" style={{ background: `hsl(${authorHue(r.author)} 65% 60%)` }} />
+              <span className="grow">{label}</span>
+              <span className="muted small">{Math.max(1, Math.round(r.share * 100))}%</span>
+              {genId && (
+                <button className="link-btn small" onClick={() => setOpen(open === genId ? null : genId)}>
+                  {open === genId ? 'hide' : 'details'}
+                </button>
+              )}
+              {genId && open === genId && gen && (
+                <div className="gen-details" data-testid="generation-details">
+                  <div className="small">
+                    Requested by {gen.requestedByName ?? 'someone'} · {timeAgo(gen.createdAt)}
+                  </div>
+                  <blockquote className="small">{gen.prompt}</blockquote>
+                  {gen.context.length > 0 && (
+                    <div className="small">
+                      Context:{' '}
+                      {gen.context.map((c, i) => (
+                        <span key={c.id}>
+                          <Link to={`/d/${c.id}`}>{c.name}</Link>
+                          {i < gen.context.length - 1 ? ', ' : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="row small">
+        Highlight:
+        {(['off', 'ai', 'all'] as const).map((m) => (
+          <button key={m} className={`btn btn-small ${mode === m ? 'btn-primary' : ''}`} onClick={() => setMode(m)}>
+            {m === 'off' ? 'none' : m === 'ai' ? 'AI' : 'everyone'}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -10,6 +10,7 @@ export interface Me {
   emailVerified: boolean;
   hasAvatar: boolean;
   prefs: {
+    authorship?: 'off' | 'ai' | 'all';
     editorMode?: EditorMode;
     keymap?: 'default' | 'vim' | 'emacs';
     theme?: 'system' | 'light' | 'dark';
@@ -66,6 +67,8 @@ export interface Doc {
   publicToken: string | null;
   restricted: boolean;
   isOwner: boolean;
+  authorship: import('@folio/markdown').Authorship | null;
+  authorMeta: import('./authorship').AuthorMeta;
   updatedAt: string;
   createdAt: string;
   deletedAt: string | null;

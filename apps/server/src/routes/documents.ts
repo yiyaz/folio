@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { applyTemplate, BUILTIN_TEMPLATES, setFrontmatterField } from '@folio/markdown';
+import { anonymizeHumans, applyTemplate, authorStats, BUILTIN_TEMPLATES, fitTo, fromSpans, isAuthorship, setFrontmatterField } from '@folio/markdown';
 import { requireUser } from '../auth/plugin.js';
 import { assertCan, assertUuid, can, documentAccess, folderAccess, type DocAccess } from '../access.js';
 import { many, one } from '../db.js';
@@ -22,6 +22,7 @@ import {
 } from '../services/documents.js';
 import { notify } from '../services/notifications.js';
 import { audit } from '../services/audit.js';
+import { authorshipOf, describeAuthors, userAuthor, verifyClaims } from '../services/authorship.js';
 import { isRestricted, protectComment, revealComment } from '../services/restricted.js';
 import { actorOf, PUBLIC_USER_SQL } from '../services/users.js';
 import type { AuthUser } from '../context.js';
@@ -89,6 +90,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       many(ctx.db, `SELECT ${PUBLIC_USER_SQL} AS u FROM users u WHERE u.id = ANY($1::uuid[])`, [[d.created_by, d.updated_by].filter(Boolean)]),
     ]);
     const byId = new Map(authors.map((r: any) => [r.u.id, r.u]));
+    const authorship = fromSpans(fitTo(authorshipOf(d, content.length, d.created_by ?? u.id), content.length, userAuthor(d.created_by ?? u.id)));
     if (a.restricted) await audit(ctx, req, { action: 'document.view', resourceType: 'document', resourceId: id, workspaceId: d.workspace_id });
     return {
       ...serializeDoc(d),
@@ -102,16 +104,41 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       publicToken: publicLink?.token ?? null,
       createdByUser: byId.get(d.created_by) ?? null,
       updatedByUser: byId.get(d.updated_by) ?? null,
+      authorship,
+      authorMeta: await describeAuthors(ctx, authorship),
     };
+  });
+
+  /** Who wrote what: attribution, contributors' shares and the provenance of AI-written text. */
+  app.get('/api/documents/:id/authorship', async (req) => {
+    const u = requireUser(req);
+    const { id } = req.params as { id: string };
+    await access(u, id, 'read');
+    const d = await getDoc(ctx.db, id);
+    const content = await readContent(ctx, d);
+    const authorship = fromSpans(fitTo(authorshipOf(d, content.length, d.created_by ?? u.id), content.length, userAuthor(d.created_by ?? u.id)));
+    const meta = await describeAuthors(ctx, authorship);
+    return { authorship, ...meta, stats: authorStats(authorship).map((s) => ({ ...s, chars: s.chars, share: Math.round(s.share * 1000) / 1000 })) };
   });
 
   app.put('/api/documents/:id/content', { bodyLimit: 6 * 1024 * 1024 }, async (req) => {
     const u = requireUser(req);
     const { id } = req.params as { id: string };
     await access(u, id, 'edit');
-    const body = z.object({ content: z.string().max(5_000_000), baseVersion: z.number().int().nullable() }).parse(req.body);
-    const r = await saveContent(ctx, u, id, body.content, body.baseVersion);
-    return { ...serializeDoc(r.doc), mentionedWithoutAccess: r.mentionedWithoutAccess };
+    const body = z
+      .object({
+        content: z.string().max(5_000_000),
+        baseVersion: z.number().int().nullable(),
+        // ranges of the new content the client says came from an AI generation (verified server-side)
+        aiClaims: z
+          .array(z.object({ from: z.number().int(), to: z.number().int(), generationId: z.uuid() }))
+          .max(2000)
+          .optional(),
+      })
+      .parse(req.body);
+    const claims = await verifyClaims(ctx, u.id, id, body.content, body.aiClaims);
+    const r = await saveContent(ctx, u, id, body.content, body.baseVersion, { claims });
+    return { ...serializeDoc(r.doc), mentionedWithoutAccess: r.mentionedWithoutAccess, authorship: r.doc.authorship };
   });
 
   app.patch('/api/documents/:id', async (req) => {
@@ -194,6 +221,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       name,
       content: await readContent(ctx, d),
       classification: d.classification,
+      // a copy keeps who wrote what
+      authorship: d.authorship ?? undefined,
     });
     return reply.code(201).send(serializeDoc(r.doc));
   });
@@ -276,15 +305,16 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const { id, revId } = req.params as { id: string; revId: string };
     await access(u, id, 'read');
     assertUuid(revId);
-    const r = await one<{ storage_key: string; version: number; created_at: Date }>(
+    const r = await one<{ storage_key: string; version: number; created_at: Date; authorship: unknown }>(
       ctx.db,
-      'SELECT storage_key, version, created_at FROM revisions WHERE id = $1 AND document_id = $2',
+      'SELECT storage_key, version, created_at, authorship FROM revisions WHERE id = $1 AND document_id = $2',
       [revId, id],
     );
     if (!r) throw notFound('Revision not found');
     const a = await documentAccess(ctx.db, u.id, id);
     if (a?.restricted) await audit(ctx, req, { action: 'document.revision_view', resourceType: 'document', resourceId: id, details: { version: r.version } });
-    return { id: revId, version: r.version, createdAt: r.created_at, content: await readBlob(ctx, id, r.storage_key) };
+    const content = await readBlob(ctx, id, r.storage_key);
+    return { id: revId, version: r.version, createdAt: r.created_at, content, authorship: isAuthorship(r.authorship) ? r.authorship : null };
   });
 
   app.post('/api/documents/:id/revisions/:revId/restore', async (req) => {
@@ -292,10 +322,15 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const { id, revId } = req.params as { id: string; revId: string };
     await access(u, id, 'edit');
     assertUuid(revId);
-    const r = await one<{ storage_key: string }>(ctx.db, 'SELECT storage_key FROM revisions WHERE id = $1 AND document_id = $2', [revId, id]);
+    const r = await one<{ storage_key: string; authorship: unknown }>(
+      ctx.db,
+      'SELECT storage_key, authorship FROM revisions WHERE id = $1 AND document_id = $2',
+      [revId, id],
+    );
     if (!r) throw notFound('Revision not found');
     const content = await readBlob(ctx, id, r.storage_key);
-    const res = await saveContent(ctx, u, id, content, null);
+    // restoring brings back the old text *and* who wrote it, rather than crediting the restorer
+    const res = await saveContent(ctx, u, id, content, null, { authorshipOverride: isAuthorship(r.authorship) ? r.authorship : undefined });
     return serializeDoc(res.doc);
   });
 
@@ -428,7 +463,19 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const d = await getDoc(ctx.db, row.document_id);
     // links are removed when a document is restricted; refuse anyway as defence in depth
     if (d.deleted_at || d.classification === 'restricted') throw notFound();
-    return { id: d.id, name: d.name, title: d.title ?? d.name, updatedAt: d.updated_at, content: await readContent(ctx, d) };
+    const publicContent = await readContent(ctx, d);
+    // the public page shows what the AI wrote, but not which coworker wrote what
+    const authorship = anonymizeHumans(fromSpans(fitTo(authorshipOf(d, publicContent.length, 'human'), publicContent.length, userAuthor('human'))));
+    const meta = await describeAuthors(ctx, authorship, { includePrompts: false });
+    return {
+      id: d.id,
+      name: d.name,
+      title: d.title ?? d.name,
+      updatedAt: d.updated_at,
+      content: publicContent,
+      authorship,
+      authorMeta: { people: {}, generations: Object.fromEntries(Object.entries(meta.generations).map(([k, g]) => [k, { ...g, requestedBy: null }])) },
+    };
   });
 
   // ---- comments ----

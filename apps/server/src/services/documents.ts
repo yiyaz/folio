@@ -1,6 +1,16 @@
 import type pg from 'pg';
 import { randomUUID } from 'node:crypto';
-import { parseDocument, rewriteWikiLinks, normalizeName, type ParsedDocument } from '@folio/markdown';
+import {
+  attributeEdit,
+  authorshipLength,
+  normalizeName,
+  parseDocument,
+  rewriteWikiLinks,
+  uniform,
+  type Authorship,
+  type ParsedDocument,
+  type Span,
+} from '@folio/markdown';
 import type { AppContext, AuthUser } from '../context.js';
 import { tx, one, many, type Queryable } from '../db.js';
 import { keys } from '../storage/index.js';
@@ -10,6 +20,7 @@ import { notify } from './notifications.js';
 import { actorOf } from './users.js';
 import { isRestricted, newDataKey, protect, protectComment, reveal, revealComment, type Classification, type KeyedDoc } from './restricted.js';
 import { safely, syncDocument } from './library.js';
+import { authorshipOf, userAuthor } from './authorship.js';
 import { dekContext, parse as parseEnvelope } from '../crypto/envelope.js';
 
 export interface DocRow {
@@ -29,6 +40,14 @@ export interface DocRow {
   classification: Classification;
   dek_wrapped: string | null;
   kek_id: string | null;
+  authorship: Authorship | null;
+}
+
+export interface SaveOptions {
+  /** Verified spans of AI-generated text among the inserted characters. */
+  claims?: Span[];
+  /** Use this attribution instead of diffing (restoring a revision with its authorship). */
+  authorshipOverride?: Authorship;
 }
 
 /** Revisions by the same author within this window are coalesced into one. */
@@ -133,22 +152,37 @@ async function adoptDanglingLinks(c: pg.PoolClient, doc: { id: string; workspace
  * window replace the latest revision instead of adding one; the blob it pointed to is returned so
  * the caller can delete it once the transaction has committed.
  */
-async function recordRevision(c: pg.PoolClient, doc: DocRow, blobKey: string, size: number, version: number, authorId: string): Promise<string | null> {
+async function recordRevision(
+  c: pg.PoolClient,
+  doc: DocRow,
+  blobKey: string,
+  size: number,
+  version: number,
+  authorId: string,
+  authorship: Authorship,
+): Promise<string | null> {
   const last = await one<{ id: string; author_id: string; created_at: Date; storage_key: string }>(
     c,
     `SELECT id, author_id, created_at, storage_key FROM revisions WHERE document_id = $1 ORDER BY version DESC LIMIT 1`,
     [doc.id],
   );
   if (last && last.author_id === authorId && Date.now() - new Date(last.created_at).getTime() < REVISION_COALESCE_MINUTES * 60_000) {
-    await c.query('UPDATE revisions SET version = $2, size = $3, storage_key = $4 WHERE id = $1', [last.id, version, size, blobKey]);
+    await c.query('UPDATE revisions SET version = $2, size = $3, storage_key = $4, authorship = $5 WHERE id = $1', [
+      last.id,
+      version,
+      size,
+      blobKey,
+      authorship,
+    ]);
     return last.storage_key;
   }
-  await c.query('INSERT INTO revisions (document_id, version, storage_key, size, author_id) VALUES ($1, $2, $3, $4, $5)', [
+  await c.query('INSERT INTO revisions (document_id, version, storage_key, size, author_id, authorship) VALUES ($1, $2, $3, $4, $5, $6)', [
     doc.id,
     version,
     blobKey,
     size,
     authorId,
+    authorship,
   ]);
   return null;
 }
@@ -210,7 +244,7 @@ async function afterSave(ctx: AppContext, user: AuthUser, doc: DocRow, fresh: { 
 export async function createDocument(
   ctx: AppContext,
   user: AuthUser,
-  input: { workspaceId: string; folderId: string | null; name: string; content: string; classification?: Classification },
+  input: { workspaceId: string; folderId: string | null; name: string; content: string; classification?: Classification; authorship?: Authorship },
 ): Promise<SaveResult> {
   const name = validateName(input.name);
   const id = randomUUID();
@@ -220,6 +254,8 @@ export async function createDocument(
   const dataKey = classification === 'restricted' ? await newDataKey(ctx, id) : null;
   const keyed = { id, workspace_id: input.workspaceId, classification, dek_wrapped: dataKey?.wrapped ?? null, kek_id: dataKey?.kekId ?? null };
   const key = await putBlob(ctx, keyed, input.content);
+  const authorship =
+    input.authorship && authorshipLength(input.authorship) === input.content.length ? input.authorship : uniform(input.content.length, userAuthor(user.id));
   const { doc, fresh } = await tx(ctx.db, async (c) => {
     if (input.folderId) {
       const f = await one(c, 'SELECT 1 FROM folders WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL', [input.folderId, input.workspaceId]);
@@ -229,8 +265,8 @@ export async function createDocument(
     try {
       doc = (await one<DocRow>(
         c,
-        `INSERT INTO documents (id, workspace_id, folder_id, name, title, storage_key, size, search_text, created_by, updated_by, classification, dek_wrapped, kek_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12) RETURNING *`,
+        `INSERT INTO documents (id, workspace_id, folder_id, name, title, storage_key, size, search_text, created_by, updated_by, classification, dek_wrapped, kek_id, authorship)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13) RETURNING *`,
         [
           id,
           input.workspaceId,
@@ -244,12 +280,13 @@ export async function createDocument(
           classification,
           keyed.dek_wrapped,
           keyed.kek_id,
+          authorship,
         ],
       ))!;
     } catch (e) {
       uniqueViolation(e, 'A document');
     }
-    await recordRevision(c, doc, key, size, 1, user.id);
+    await recordRevision(c, doc, key, size, 1, user.id, authorship);
     const fresh = await reindex(c, doc, parsed);
     await adoptDanglingLinks(c, doc);
     return { doc, fresh };
@@ -261,19 +298,26 @@ export async function createDocument(
   return afterSave(ctx, user, doc, fresh, input.content);
 }
 
-export async function saveContent(ctx: AppContext, user: AuthUser, docId: string, content: string, baseVersion: number | null): Promise<SaveResult> {
+export async function saveContent(
+  ctx: AppContext,
+  user: AuthUser,
+  docId: string,
+  content: string,
+  baseVersion: number | null,
+  opts: SaveOptions = {},
+): Promise<SaveResult> {
   // A concurrent classification change can make the pre-written blob the wrong kind
   // (plaintext for a now-restricted document); detect that under the row lock and retry.
   for (let attempt = 0; ; attempt++) {
     try {
-      return await saveOnce(ctx, user, docId, content, baseVersion);
+      return await saveOnce(ctx, user, docId, content, baseVersion, opts);
     } catch (e) {
       if (!(e instanceof ClassificationChanged) || attempt >= 2) throw e;
     }
   }
 }
 
-async function saveOnce(ctx: AppContext, user: AuthUser, docId: string, content: string, baseVersion: number | null): Promise<SaveResult> {
+async function saveOnce(ctx: AppContext, user: AuthUser, docId: string, content: string, baseVersion: number | null, opts: SaveOptions): Promise<SaveResult> {
   const parsed = parseDocument(content);
   const size = Buffer.byteLength(content);
   const meta = await one<KeyedDoc & { workspace_id: string }>(
@@ -300,14 +344,20 @@ async function saveOnce(ctx: AppContext, user: AuthUser, docId: string, content:
       });
     }
     const version = cur.version + 1;
+    // who wrote what: surviving text keeps its author, new text is the saver's (or verified AI)
+    const oldText = await readContent(ctx, cur);
+    const authorship =
+      opts.authorshipOverride && authorshipLength(opts.authorshipOverride) === content.length
+        ? opts.authorshipOverride
+        : attributeEdit(authorshipOf(cur, oldText.length, user.id), oldText, content, userAuthor(user.id), opts.claims);
     // restricted documents keep no plaintext in the database: no derived title, no search text
     const doc = (await one<DocRow>(
       c,
-      `UPDATE documents SET version = $2, title = $3, size = $4, search_text = $5, storage_key = $6, updated_by = $7, updated_at = now()
+      `UPDATE documents SET version = $2, title = $3, size = $4, search_text = $5, storage_key = $6, updated_by = $7, authorship = $8, updated_at = now()
        WHERE id = $1 RETURNING *`,
-      [docId, version, restricted ? null : parsed.title, size, restricted ? '' : parsed.text, key, user.id],
+      [docId, version, restricted ? null : parsed.title, size, restricted ? '' : parsed.text, key, user.id, authorship],
     ))!;
-    const coalesced = await recordRevision(c, doc, key, size, version, user.id);
+    const coalesced = await recordRevision(c, doc, key, size, version, user.id, authorship);
     replaced = [cur.storage_key, coalesced];
     const fresh = await reindex(c, doc, parsed);
     return { doc, fresh };
@@ -493,6 +543,9 @@ async function reclassifyOnce(ctx: AppContext, user: AuthUser, docId: string, ta
         await c.query('UPDATE comments SET body = $2, anchor_text = $3, encrypted = $4 WHERE id = $1', [id, v.body, v.anchor, v.encrypted]);
       if (target === 'restricted') {
         await c.query('DELETE FROM public_links WHERE document_id = $1', [docId]);
+        // AI generations keep their prompt and output for provenance; for a restricted document
+        // those would be plaintext copies of its content, so scrub them (attribution stays)
+        await c.query(`UPDATE ai_generations SET output = '', prompt = '(removed: document restricted)' WHERE document_id = $1`, [docId]);
         // whoever restricts a document must keep access to it
         if (doc.created_by !== user.id) {
           await c.query(

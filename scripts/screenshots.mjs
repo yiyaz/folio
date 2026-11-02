@@ -31,6 +31,7 @@ const server = spawn('node', ['e2e/start-server.mjs'], {
     RATE_LIMIT_AUTH_PER_MIN: '1000',
     PUBLIC_URL: BASE,
     APP_SECRET: 'screenshots-secret-screenshots-secret',
+    AI_PROVIDER: 'fake',
   },
 });
 const stop = () => server.kill('SIGTERM');
@@ -69,6 +70,7 @@ const bob = await user('bob', 'Bob Martinez');
 await user('priya', 'Priya Natarajan');
 const ws = (await alice.req('POST', '/api/workspaces', { name: 'ML Platform' })).id;
 await alice.req('POST', `/api/workspaces/${ws}/members`, { user: 'priya', role: 'editor' });
+await alice.req('POST', `/api/workspaces/${ws}/members`, { user: 'bob', role: 'editor' });
 const folder = async (name, parentId = null) => (await alice.req('POST', '/api/folders', { workspaceId: ws, name, parentId })).id;
 const doc = async (name, content, folderId = null) => (await alice.req('POST', '/api/documents', { workspaceId: ws, folderId, name, content })).id;
 
@@ -246,6 +248,26 @@ const priya = new Api();
 await priya.req('POST', '/api/auth/login', { login: 'priya', password: PASSWORD });
 await priya.req('GET', `/api/documents/${comp}`);
 
+// an AI-drafted document that coworkers then edited
+const summary = await alice.req('POST', '/api/ai/generate', {
+  prompt: 'executive summary of the churn model results',
+  workspaceId: ws,
+  context: { documentIds: [churn, featureStore] },
+  target: { type: 'new', name: 'Churn model: executive summary', folderId: experiments },
+});
+const sumDoc = await bob.req('GET', `/api/documents/${summary.document.id}`);
+await bob.req('PUT', `/api/documents/${summary.document.id}/content`, {
+  content: sumDoc.content.replace('Second key point.', 'Second key point, confirmed with the finance team.'),
+  baseVersion: sumDoc.version,
+});
+const priyaApi = new Api();
+await priyaApi.req('POST', '/api/auth/login', { login: 'priya', password: PASSWORD });
+const s2 = await priyaApi.req('GET', `/api/documents/${summary.document.id}`);
+await priyaApi.req('PUT', `/api/documents/${summary.document.id}/content`, {
+  content: s2.content + '\nRecommendation: ship the recency features to production next sprint.\n',
+  baseVersion: s2.version,
+});
+
 // ---------- screenshots ----------
 const browser = await chromium.launch(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {});
 async function session(opts = {}) {
@@ -349,6 +371,33 @@ await r.page.getByTestId('storage-card').scrollIntoViewIfNeeded();
 await r.page.waitForTimeout(300);
 await r.page.getByTestId('storage-card').screenshot({ path: path.join(OUT, 'storage.png') });
 await r.ctx.close();
+
+// 8d. authorship: AI text, coworkers' edits and the authors panel
+const au = await session();
+await au.page.evaluate((ids) => localStorage.setItem('folio.tree.expanded', JSON.stringify(ids)), [design, experiments, runbooks]);
+await open(au.page, summary.document.id, 'live');
+await au.page.getByTestId('authorship-mode').selectOption('all');
+await au.page.getByTestId('panel-authors').click();
+await au.page.getByTestId('authors-panel').getByRole('button', { name: 'details' }).first().click();
+await au.page.waitForSelector('[data-testid=generation-details]');
+await au.page.keyboard.press('ControlOrMeta+Home');
+await au.page.locator('.cm-line', { hasText: 'Recommendation' }).hover();
+await au.page.waitForTimeout(500);
+await shot(au.page, 'authorship');
+await au.page.getByTestId('authorship-mode').selectOption('ai');
+
+// 8e. the AI dialog with workspace context
+await open(au.page, featureStore, 'live');
+await au.page.getByTestId('tb-ai').click();
+await au.page.getByTestId('ai-prompt').fill('a rollout plan for the online store');
+await au.page.getByTestId('ai-ctx-pick').check();
+await au.page.getByTestId('ai-pick-Churn model v3').check();
+await au.page.getByTestId('ai-pick-Feature backfill runbook').check();
+await au.page.getByTestId('ai-generate').click();
+await au.page.getByTestId('ai-accept').waitFor();
+await au.page.waitForTimeout(300);
+await shot(au.page, 'ai-dialog');
+await au.ctx.close();
 
 // 9. dark mode
 const dark = await session({ colorScheme: 'dark' });

@@ -11,6 +11,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "diff": "^9.0.0",
     "github-slugger": "^2.0.0",
     "hast-util-sanitize": "^5.0.2",
     "mdast-util-to-string": "^4.0.0",

@@ -53,3 +53,47 @@ export const post = <T = any>(p: string, body: Body = {}) => api<T>(p, { method:
 export const put = <T = any>(p: string, body: Body) => api<T>(p, { method: 'PUT', body });
 export const patch = <T = any>(p: string, body: Body) => api<T>(p, { method: 'PATCH', body });
 export const del = <T = any>(p: string) => api<T>(p, { method: 'DELETE' });
+
+/**
+ * POST and read a server-sent event stream (fetch-based, so it can carry a body and the CSRF
+ * header, unlike EventSource). Calls onEvent for each event until the stream ends.
+ */
+export async function postEventStream(path: string, body: unknown, onEvent: (event: string, data: any) => void, signal?: AbortSignal): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: { 'x-requested-with': 'folio', 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+      signal,
+    });
+  } catch (e) {
+    if (signal?.aborted) return;
+    throw new ApiError(0, 'network', e instanceof Error ? e.message : 'Network error');
+  }
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, data.error ?? 'error', data.message ?? res.statusText);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const event = /^event: (.*)$/m.exec(block)?.[1] ?? 'message';
+        const data = /^data: (.*)$/m.exec(block)?.[1];
+        if (data) onEvent(event, JSON.parse(data));
+      }
+    }
+  } catch (e) {
+    if (!signal?.aborted) throw e;
+  }
+}

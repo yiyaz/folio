@@ -29,6 +29,10 @@ config:
   pyodideUrl: https://cdn.jsdelivr.net/pyodide/v0.27.7/full/
   githubApiUrl: https://api.github.com
   jiraBaseUrl: ''
+  ai:
+    model: claude-opus-5-5 # needs secrets.anthropicApiKey
+    effort: medium
+    contextMaxChars: 400000
   oidc:
     issuer: '' # enable SSO by setting issuer + clientId (+ secret below)
     clientId: ''

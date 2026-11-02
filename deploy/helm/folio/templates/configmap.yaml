@@ -20,6 +20,9 @@ data:
   PYODIDE_URL: {{ .Values.config.pyodideUrl | quote }}
   GITHUB_API_URL: {{ .Values.config.githubApiUrl | quote }}
   JIRA_BASE_URL: {{ .Values.config.jiraBaseUrl | quote }}
+  AI_MODEL: {{ .Values.config.ai.model | quote }}
+  AI_EFFORT: {{ .Values.config.ai.effort | quote }}
+  AI_CONTEXT_MAX_CHARS: {{ .Values.config.ai.contextMaxChars | quote }}
   OIDC_ISSUER: {{ .Values.config.oidc.issuer | quote }}
   OIDC_CLIENT_ID: {{ .Values.config.oidc.clientId | quote }}
   OIDC_NAME: {{ .Values.config.oidc.name | quote }}

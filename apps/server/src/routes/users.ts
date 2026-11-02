@@ -22,6 +22,7 @@ export async function registerUserRoutes(app: FastifyInstance) {
         prefs: z
           .object({
             editorMode: z.enum(['live', 'source', 'split', 'read']).optional(),
+            authorship: z.enum(['off', 'ai', 'all']).optional(),
             keymap: z.enum(['default', 'vim', 'emacs']).optional(),
             theme: z.enum(['system', 'light', 'dark']).optional(),
             emailNotifications: z.boolean().optional(),

@@ -66,12 +66,25 @@ sending traffic. It then closes WebSockets, finishes in-flight requests and exit
   `folio_document_saves_total` and the Node.js defaults.
 - Tracing: set `config.otel.endpoint` to an OTLP/HTTP collector.
 
+### Locating and recovering files
+
+Every workspace is mirrored as plain Markdown under `library/` in the bucket or storage
+directory. See [storage-and-security.md](storage-and-security.md) for the layout and recovery
+steps. Operators can use the admin CLI inside a pod:
+
+```bash
+kubectl -n folio exec deploy/folio -- node dist/admin-cli.js library:rebuild
+kubectl -n folio exec deploy/folio -- node dist/admin-cli.js keys:rotate
+```
+
 ### Backups
 
 - **Postgres**: use managed backups or point-in-time recovery, or schedule
   `pg_dump -Fc "$DATABASE_URL"` with a CronJob.
 - **Object storage**: enable bucket versioning and lifecycle rules. Documents and revisions are
   written once per version, so versioning is cheap.
+- **Keys for restricted documents** (`FOLIO_KEYS` or the Vault transit key): back them up
+  separately from the data. Without them restricted documents cannot be decrypted.
 - **Portable copy**: `folio pull <workspace-id> backup/` (CLI) or the workspace "Download .zip"
   button gives you plain Markdown you can open anywhere.
 

@@ -40,6 +40,11 @@ PostgreSQL: users, sessions, permissions, link index, tags, comments, revisions,
   Postgres `LISTEN/NOTIFY`, and presence is a Postgres table with heartbeats. Migrations take an
   advisory lock, so several replicas or initContainers can start at the same time.
 
+- **Readable library and restricted documents.** Storage keeps a human-readable `library/` copy
+  of each workspace next to the immutable version store, and restricted documents add
+  deny-by-default access plus envelope encryption. Both are described in
+  [storage-and-security.md](storage-and-security.md).
+
 ## Security
 
 - Passwords are hashed with argon2id. Session, verification and reset tokens are random and

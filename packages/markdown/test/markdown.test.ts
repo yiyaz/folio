@@ -175,6 +175,22 @@ describe('renderToHtml', () => {
   });
 });
 
+describe('source spans', () => {
+  it('tags rendered text with its exact source range', () => {
+    const src = '# Title\n\nSome **bold** text and [[Doc]].';
+    const html = renderToHtml(src, { sourceSpans: true });
+    const spans = [...html.matchAll(/<span data-s="(\d+)" data-e="(\d+)">([^<]*)<\/span>/g)];
+    expect(spans.length).toBeGreaterThan(3);
+    for (const [, s, e, text] of spans) if (Number(e) - Number(s) === text.length) expect(src.slice(Number(s), Number(e))).toBe(text);
+    expect(spans.map((m) => m[3])).toEqual(expect.arrayContaining(['Title', 'bold']));
+  });
+  it('marks code blocks as a unit and adds nothing without the option', () => {
+    const src = 'x\n\n```js\nconst a = 1\n```';
+    expect(renderToHtml(src, { sourceSpans: true })).toMatch(/<pre data-s="3" data-e="\d+">/);
+    expect(renderToHtml(src)).not.toContain('data-s');
+  });
+});
+
 describe('templates', () => {
   it('substitutes variables', () => {
     const t = BUILTIN_TEMPLATES.find((x) => x.id === 'adr')!;

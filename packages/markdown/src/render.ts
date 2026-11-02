@@ -28,7 +28,31 @@ export interface RenderOptions {
   tagHref?: (tag: string) => string;
   /** URL patterns that should become rich embeds when a link sits alone in a paragraph. */
   isEmbeddableUrl?: (url: string) => boolean;
+  /**
+   * Wrap rendered text in `<span data-s data-e>` carrying its source character range (and mark
+   * code blocks the same way), so callers can map source attribution onto the rendered page.
+   */
+  sourceSpans?: boolean;
 }
+
+/** Tag text with the source offsets it came from (runs before sanitising; attributes allow-listed). */
+const rehypeSourceSpans: Plugin<[], HRoot> = () => (tree) => {
+  visit(tree, (node: any, index, parent: any) => {
+    if (node.type === 'element' && node.tagName === 'pre' && node.position?.start?.offset != null) {
+      node.properties = { ...node.properties, dataS: node.position.start.offset, dataE: node.position.end.offset };
+      return SKIP;
+    }
+    if (node.type !== 'text' || !parent || index == null || node.position?.start?.offset == null) return;
+    if (!node.value.trim()) return;
+    parent.children[index] = {
+      type: 'element',
+      tagName: 'span',
+      properties: { dataS: node.position.start.offset, dataE: node.position.end.offset },
+      children: [node],
+    };
+    return SKIP;
+  });
+};
 
 /** Fenced-code languages rendered by client-side enhancers instead of a highlighter. */
 export const ENHANCED_LANGUAGES = ['mermaid', 'vega-lite', 'vegalite', 'graphviz', 'dot', 'plantuml', 'csv', 'notebook', 'dataset'];
@@ -131,15 +155,24 @@ const remarkFolio: Plugin<[RenderOptions?], Root> = (opts = {}) => {
       }
       if (!hits.length) return;
       hits.sort((a, b) => a.index - b.index);
+      // keep source positions on the pieces (when the node maps 1:1 onto its source text)
+      const start = (node as Text).position?.start;
+      const exact = start?.offset != null && (node as Text).position!.end.offset! - start.offset === value.length;
+      const at = (from: number, to: number) =>
+        exact ? { start: { ...start!, offset: start!.offset! + from }, end: { ...start!, offset: start!.offset! + to } } : undefined;
       const out: Seg[] = [];
       let pos = 0;
       for (const h of hits) {
         if (h.index < pos) continue; // overlapping (e.g. a #tag inside a wikilink)
-        if (h.index > pos) out.push({ type: 'text', value: value.slice(pos, h.index) });
-        out.push(h.make());
+        if (h.index > pos) out.push({ type: 'text', value: value.slice(pos, h.index), position: at(pos, h.index) });
+        const made = h.make() as Link;
+        const p = at(h.index, h.index + h.length);
+        made.position = p;
+        for (const child of made.children) (child as Text).position = p;
+        out.push(made);
         pos = h.index + h.length;
       }
-      if (pos < value.length) out.push({ type: 'text', value: value.slice(pos) });
+      if (pos < value.length) out.push({ type: 'text', value: value.slice(pos), position: at(pos, value.length) });
       (parent.children as Seg[]).splice(index, 1, ...out);
       return [SKIP, index + out.length];
     });
@@ -171,6 +204,8 @@ const schema: SanitizeSchema = {
     code: [...withoutClass(defaultSchema.attributes?.code), 'className', 'dataRun'],
     input: [...(defaultSchema.attributes?.input || []), 'dataTask'],
     img: [...(defaultSchema.attributes?.img || []), 'width', 'height', 'title'],
+    span: [...(defaultSchema.attributes?.span || []), 'dataS', 'dataE'],
+    pre: [...(defaultSchema.attributes?.pre || []), 'dataS', 'dataE'],
   },
   protocols: { ...defaultSchema.protocols, href: ['http', 'https', 'mailto'], src: ['http', 'https'] },
 };
@@ -184,6 +219,7 @@ function buildProcessor(opts: RenderOptions) {
     .use(remarkFolio, opts)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
+    .use(opts.sourceSpans ? rehypeSourceSpans : () => {})
     .use(rehypeSanitize, schema)
     .use(rehypeBlockIds)
     .use(rehypeSlug)

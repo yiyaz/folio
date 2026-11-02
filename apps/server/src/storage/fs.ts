@@ -34,7 +34,16 @@ export class FsStorage implements Storage {
   }
 
   async delete(key: string): Promise<void> {
-    await fs.rm(this.resolve(key), { force: true });
+    const p = this.resolve(key);
+    await fs.rm(p, { force: true });
+    // prune now-empty directories so the readable library doesn't accumulate empty folders
+    for (let dir = path.dirname(p); dir.startsWith(this.root + path.sep); dir = path.dirname(dir)) {
+      try {
+        await fs.rmdir(dir);
+      } catch {
+        break;
+      }
+    }
   }
 
   async exists(key: string): Promise<boolean> {
@@ -44,6 +53,38 @@ export class FsStorage implements Storage {
     } catch {
       return false;
     }
+  }
+
+  async list(prefix: string): Promise<string[]> {
+    // the prefix may end inside a directory name ("library/ML Plat") or at a separator
+    const dirPart = prefix.includes('/') ? prefix.slice(0, prefix.lastIndexOf('/')) : '';
+    const start = dirPart ? this.resolve(dirPart) : this.root;
+    const out: string[] = [];
+    const walk = async (abs: string) => {
+      let entries;
+      try {
+        entries = await fs.readdir(abs, { withFileTypes: true });
+      } catch (e: any) {
+        if (e.code === 'ENOENT') return;
+        throw e;
+      }
+      for (const e of entries) {
+        const p = path.join(abs, e.name);
+        if (e.isDirectory()) await walk(p);
+        else if (!e.name.endsWith('.tmp')) {
+          const key = path.relative(this.root, p).split(path.sep).join('/');
+          if (key.startsWith(prefix)) out.push(key);
+        }
+      }
+    };
+    await walk(start);
+    return out.sort();
+  }
+
+  locate(key: string): string {
+    if (!key) return this.root;
+    // keep a trailing separator for "directory" keys so callers can tell them apart
+    return this.resolve(key) + (key.endsWith('/') ? path.sep : '');
   }
 
   async ping(): Promise<void> {

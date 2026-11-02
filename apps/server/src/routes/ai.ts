@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { requireUser } from '../auth/plugin.js';
 import { HttpError } from '../errors.js';
+import { one } from '../db.js';
 
 const PROMPTS = {
   summarize: 'Summarize the following Markdown document for a busy colleague. Reply in Markdown with a one-sentence TL;DR followed by at most 6 bullet points.',
@@ -28,8 +29,15 @@ export async function registerAiRoutes(app: FastifyInstance) {
 
   app.post('/api/ai', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
     requireUser(req);
+    const body = z
+      .object({ action: z.enum(['summarize', 'explain', 'docs', 'improve']), text: z.string().min(1).max(200_000), documentId: z.uuid().optional() })
+      .parse(req.body);
+    // restricted content must not be sent to a third-party service
+    if (body.documentId) {
+      const d = await one<{ classification: string }>(app.ctx.db, 'SELECT classification FROM documents WHERE id = $1', [body.documentId]);
+      if (d?.classification === 'restricted') throw new HttpError(403, 'restricted', 'AI assist is disabled for restricted documents');
+    }
     if (!client) throw new HttpError(501, 'ai_disabled', 'AI assist is not configured on this server');
-    const body = z.object({ action: z.enum(['summarize', 'explain', 'docs', 'improve']), text: z.string().min(1).max(200_000) }).parse(req.body);
     try {
       const response = await client.beta.messages.create({
         model: cfg.AI_MODEL,

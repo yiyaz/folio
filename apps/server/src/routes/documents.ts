@@ -4,21 +4,25 @@ import { applyTemplate, BUILTIN_TEMPLATES, setFrontmatterField } from '@folio/ma
 import { requireUser } from '../auth/plugin.js';
 import { assertCan, assertUuid, can, documentAccess, folderAccess, type DocAccess } from '../access.js';
 import { many, one } from '../db.js';
-import { badRequest, notFound } from '../errors.js';
-import { randomToken } from '../crypto.js';
+import { badRequest, forbidden, notFound } from '../errors.js';
+import { randomToken } from '../crypto/tokens.js';
 import {
   createDocument,
   deleteDocumentPermanently,
   freeName,
   getDoc,
+  readBlob,
   readContent,
   restoreDocument,
   saveContent,
   serializeDoc,
+  setClassification,
   trashDocument,
   updateDocumentMeta,
 } from '../services/documents.js';
 import { notify } from '../services/notifications.js';
+import { audit } from '../services/audit.js';
+import { isRestricted, protectComment, revealComment } from '../services/restricted.js';
 import { actorOf, PUBLIC_USER_SQL } from '../services/users.js';
 import type { AuthUser } from '../context.js';
 
@@ -85,11 +89,14 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       many(ctx.db, `SELECT ${PUBLIC_USER_SQL} AS u FROM users u WHERE u.id = ANY($1::uuid[])`, [[d.created_by, d.updated_by].filter(Boolean)]),
     ]);
     const byId = new Map(authors.map((r: any) => [r.u.id, r.u]));
+    if (a.restricted) await audit(ctx, req, { action: 'document.view', resourceType: 'document', resourceId: id, workspaceId: d.workspace_id });
     return {
       ...serializeDoc(d),
       content,
       role: a.role,
       sharedOnly: a.sharedOnly,
+      restricted: a.restricted,
+      isOwner: a.isOwner,
       workspaceName: ws?.name,
       folderPath,
       publicToken: publicLink?.token ?? null,
@@ -140,23 +147,64 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  /** Make a document restricted (any editor) or standard again (only its owner). */
+  app.put('/api/documents/:id/classification', async (req) => {
+    const u = requireUser(req);
+    const { id } = req.params as { id: string };
+    const { classification } = z.object({ classification: z.enum(['standard', 'restricted']) }).parse(req.body);
+    const a = await access(u, id, 'edit');
+    if (classification === 'standard' && a.restricted && !a.isOwner) throw forbidden('Only the owner can lift the restriction');
+    const d = await setClassification(ctx, u, id, classification);
+    await audit(ctx, req, {
+      action: classification === 'restricted' ? 'document.classified' : 'document.declassified',
+      resourceType: 'document',
+      resourceId: id,
+      workspaceId: d.workspace_id,
+    });
+    return serializeDoc(d);
+  });
+
+  /** Who did what with this document (restricted: owner only; standard: people who can share). */
+  app.get('/api/documents/:id/audit', async (req) => {
+    const u = requireUser(req);
+    const { id } = req.params as { id: string };
+    const a = await access(u, id, 'read', { allowDeleted: true });
+    if (a.restricted ? !a.isOwner : !can(a.role, 'share')) throw forbidden('Only the owner can see the access log');
+    return many(
+      ctx.db,
+      `SELECT l.id::text, l.at, l.action, l.ip, l.details, ${PUBLIC_USER_SQL} AS actor
+       FROM audit_log l LEFT JOIN users u ON u.id = l.actor_id
+       WHERE l.resource_id = $1 OR l.details->>'documentId' = $1::text ORDER BY l.at DESC, l.id DESC LIMIT 500`,
+      [id],
+    );
+  });
+
   app.post('/api/documents/:id/duplicate', async (req, reply) => {
     const u = requireUser(req);
     const { id } = req.params as { id: string };
     const a = await access(u, id, 'read');
+    // copying is a way to re-share content: only the owner may copy a restricted document
+    if (a.restricted && !a.isOwner) throw forbidden('Only the owner can duplicate a restricted document');
     const d = await getDoc(ctx.db, id);
     await app.canEditTarget(u.id, a.workspaceId, d.folder_id);
     const name = await freeName(ctx.db, d.workspace_id, d.folder_id, `${d.name} copy`);
-    const r = await createDocument(ctx, u, { workspaceId: d.workspace_id, folderId: d.folder_id, name, content: await readContent(ctx, d) });
+    const r = await createDocument(ctx, u, {
+      workspaceId: d.workspace_id,
+      folderId: d.folder_id,
+      name,
+      content: await readContent(ctx, d),
+      classification: d.classification,
+    });
     return reply.code(201).send(serializeDoc(r.doc));
   });
 
   app.get('/api/documents/:id/export', async (req, reply) => {
     const u = requireUser(req);
     const { id } = req.params as { id: string };
-    await access(u, id, 'read');
+    const a = await access(u, id, 'read');
     const d = await getDoc(ctx.db, id);
     const content = setFrontmatterField(await readContent(ctx, d), 'id', d.id);
+    if (a.restricted) await audit(ctx, req, { action: 'document.export', resourceType: 'document', resourceId: id, workspaceId: d.workspace_id });
     return reply
       .type('text/markdown; charset=utf-8')
       .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(d.name)}.md`)
@@ -182,7 +230,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       if (!a || !can(a.role, 'read')) continue;
       let excerpt = '';
       try {
-        const text = (await ctx.storage.get(r.storage_key)).toString('utf8');
+        const text = await readBlob(ctx, r.id, r.storage_key);
         const p = r.positions[0] ?? 0;
         const start = Math.max(0, text.lastIndexOf('\n', p) + 1);
         const endNl = text.indexOf('\n', p);
@@ -234,7 +282,9 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       [revId, id],
     );
     if (!r) throw notFound('Revision not found');
-    return { id: revId, version: r.version, createdAt: r.created_at, content: (await ctx.storage.get(r.storage_key)).toString('utf8') };
+    const a = await documentAccess(ctx.db, u.id, id);
+    if (a?.restricted) await audit(ctx, req, { action: 'document.revision_view', resourceType: 'document', resourceId: id, details: { version: r.version } });
+    return { id: revId, version: r.version, createdAt: r.created_at, content: await readBlob(ctx, id, r.storage_key) };
   });
 
   app.post('/api/documents/:id/revisions/:revId/restore', async (req) => {
@@ -244,7 +294,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     assertUuid(revId);
     const r = await one<{ storage_key: string }>(ctx.db, 'SELECT storage_key FROM revisions WHERE id = $1 AND document_id = $2', [revId, id]);
     if (!r) throw notFound('Revision not found');
-    const content = (await ctx.storage.get(r.storage_key)).toString('utf8');
+    const content = await readBlob(ctx, id, r.storage_key);
     const res = await saveContent(ctx, u, id, content, null);
     return serializeDoc(res.doc);
   });
@@ -271,6 +321,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
          FROM permissions p JOIN users u ON u.id = p.user_id WHERE p.resource_type = $1 AND p.resource_id = $2 ORDER BY u.username`,
         [type, id],
       );
+      if (a.restricted) {
+        // workspace members and folder shares have no access to a restricted document
+        const owner = await one(ctx.db, `SELECT ${PUBLIC_USER_SQL} AS user FROM documents d JOIN users u ON u.id = d.created_by WHERE d.id = $1`, [id]);
+        return { direct, inherited: [], members: [], owner: owner?.user ?? null, restricted: true, canShare: a.isOwner };
+      }
       // permissions inherited from parent folders
       const inherited = a.folderId
         ? await many(
@@ -287,7 +342,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
          FROM workspace_members m JOIN users u ON u.id = m.user_id JOIN workspaces w ON w.id = m.workspace_id WHERE m.workspace_id = $1 ORDER BY u.username`,
         [a.workspaceId],
       );
-      return { direct, inherited, members, canShare: can(a.role, 'share') };
+      return { direct, inherited, members, owner: null, restricted: false, canShare: can(a.role, 'share') };
     });
 
     app.post(base, async (req, reply) => {
@@ -295,6 +350,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       const { id } = req.params as { id: string };
       const a = await resourceAccess(u, type, id);
       assertCan(a.role, 'share');
+      // restricted documents: only the owner decides who may see them
+      if (a.restricted && !a.isOwner) throw forbidden('Only the owner can share a restricted document');
       const body = z.object({ user: z.string().trim().min(1), role: z.enum(['viewer', 'commenter', 'editor']) }).parse(req.body);
       const target = await one<{ id: string }>(
         ctx.db,
@@ -317,6 +374,13 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         documentName: type === 'document' ? name : `folder "${name}"`,
         role: body.role,
       });
+      await audit(ctx, req, {
+        action: 'permission.granted',
+        resourceType: type,
+        resourceId: id,
+        workspaceId: a.workspaceId,
+        details: { userId: target.id, role: body.role },
+      });
       return reply.code(201).send({ ok: true });
     });
 
@@ -324,8 +388,13 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       const u = requireUser(req);
       const { id, userId } = req.params as { id: string; userId: string };
       const a = await resourceAccess(u, type, id);
-      if (userId !== u.id) assertCan(a.role, 'share'); // anyone may remove their own access
-      await ctx.db.query('DELETE FROM permissions WHERE resource_type = $1 AND resource_id = $2 AND user_id::text = $3', [type, id, userId]);
+      if (userId !== u.id) {
+        assertCan(a.role, 'share'); // anyone may remove their own access
+        if (a.restricted && !a.isOwner) throw forbidden('Only the owner can change who sees a restricted document');
+      }
+      const r = await ctx.db.query('DELETE FROM permissions WHERE resource_type = $1 AND resource_id = $2 AND user_id::text = $3', [type, id, userId]);
+      if (r.rowCount)
+        await audit(ctx, req, { action: 'permission.revoked', resourceType: type, resourceId: id, workspaceId: a.workspaceId, details: { userId } });
       return { ok: true };
     });
   }
@@ -333,7 +402,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   app.post('/api/documents/:id/public-link', async (req) => {
     const u = requireUser(req);
     const { id } = req.params as { id: string };
-    await access(u, id, 'share');
+    const a = await access(u, id, 'share');
+    if (a.restricted) throw badRequest('Restricted documents cannot have a public link');
     const row = await one<{ token: string }>(
       ctx.db,
       `INSERT INTO public_links (token, document_id, created_by) VALUES ($1, $2, $3) ON CONFLICT (document_id) DO UPDATE SET document_id = EXCLUDED.document_id RETURNING token`,
@@ -356,7 +426,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const row = await one<{ document_id: string }>(ctx.db, 'SELECT document_id FROM public_links WHERE token = $1', [token]);
     if (!row) throw notFound();
     const d = await getDoc(ctx.db, row.document_id);
-    if (d.deleted_at) throw notFound();
+    // links are removed when a document is restricted; refuse anyway as defence in depth
+    if (d.deleted_at || d.classification === 'restricted') throw notFound();
     return { id: d.id, name: d.name, title: d.title ?? d.name, updatedAt: d.updated_at, content: await readContent(ctx, d) };
   });
 
@@ -365,12 +436,19 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const u = requireUser(req);
     const { id } = req.params as { id: string };
     await access(u, id, 'read');
-    return many(
+    const rows = await many<{ body: string; anchorText: string | null; encrypted: boolean }>(
       ctx.db,
       `SELECT c.id, c.parent_id AS "parentId", c.body, c.anchor_text AS "anchorText", c.anchor_start AS "anchorStart", c.anchor_end AS "anchorEnd",
-         c.resolved_at AS "resolvedAt", c.created_at AS "createdAt", c.updated_at AS "updatedAt", ${PUBLIC_USER_SQL} AS author
+         c.resolved_at AS "resolvedAt", c.created_at AS "createdAt", c.updated_at AS "updatedAt", c.encrypted, ${PUBLIC_USER_SQL} AS author
        FROM comments c LEFT JOIN users u ON u.id = c.author_id WHERE c.document_id = $1 ORDER BY c.created_at`,
       [id],
+    );
+    return Promise.all(
+      rows.map(async ({ encrypted, ...c }) => ({
+        ...c,
+        body: await revealComment(ctx, id, c.body, encrypted),
+        anchorText: c.anchorText == null ? null : await revealComment(ctx, id, c.anchorText, encrypted),
+      })),
     );
   });
 
@@ -398,16 +476,19 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       if (p.parent_id) throw badRequest('replies cannot be nested');
       parentAuthor = p.author_id;
     }
+    const d = await getDoc(ctx.db, id);
+    // on restricted documents both the comment and the quoted text are encrypted
+    const stored = await protectComment(ctx, d, body.body);
+    const anchor = body.parentId || body.anchorText == null ? null : (await protectComment(ctx, d, body.anchorText)).body;
     const c = await one<{ id: string }>(
       ctx.db,
-      `INSERT INTO comments (document_id, parent_id, author_id, body, anchor_text, anchor_start, anchor_end) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [id, body.parentId ?? null, u.id, body.body, body.parentId ? null : (body.anchorText ?? null), body.anchorStart ?? null, body.anchorEnd ?? null],
+      `INSERT INTO comments (document_id, parent_id, author_id, body, anchor_text, anchor_start, anchor_end, encrypted) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [id, body.parentId ?? null, u.id, stored.body, anchor, body.anchorStart ?? null, body.anchorEnd ?? null, stored.encrypted],
     );
-    const d = await getDoc(ctx.db, id);
     const docName = d.title ?? d.name;
     const actor = actorOf(u);
     const notified = new Set<string>([u.id]);
-    const excerpt = body.body.slice(0, 200);
+    const excerpt = isRestricted(d) ? undefined : body.body.slice(0, 200);
     if (parentAuthor && !notified.has(parentAuthor)) {
       notified.add(parentAuthor);
       await notify(ctx, parentAuthor, 'reply', { actor, documentId: id, documentName: docName, commentId: c!.id, excerpt });
@@ -447,7 +528,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const body = z.object({ body: z.string().trim().min(1).max(10_000).optional(), resolved: z.boolean().optional() }).parse(req.body);
     if (body.body !== undefined) {
       if (c.author_id !== u.id) throw badRequest('Only the author can edit a comment');
-      await ctx.db.query('UPDATE comments SET body = $2, updated_at = now() WHERE id = $1', [id, body.body]);
+      const stored = await protectComment(ctx, await getDoc(ctx.db, c.document_id), body.body);
+      await ctx.db.query('UPDATE comments SET body = $2, encrypted = $3, updated_at = now() WHERE id = $1', [id, stored.body, stored.encrypted]);
     }
     if (body.resolved !== undefined) {
       await ctx.db.query(

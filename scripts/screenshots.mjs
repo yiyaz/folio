@@ -237,6 +237,15 @@ await alice.req('PUT', `/api/documents/${churn}/content`, {
   baseVersion: churnDoc.version,
 });
 
+// a restricted document, shared with one person, opened by them
+const people = await folder('People');
+const comp = await doc('Compensation bands 2027', '# Compensation bands 2027\n\n| Level | Band |\n|---|---|\n| L4 | … |\n', people);
+await alice.req('PUT', `/api/documents/${comp}/classification`, { classification: 'restricted' });
+await alice.req('POST', `/api/documents/${comp}/permissions`, { user: 'priya', role: 'viewer' });
+const priya = new Api();
+await priya.req('POST', '/api/auth/login', { login: 'priya', password: PASSWORD });
+await priya.req('GET', `/api/documents/${comp}`);
+
 // ---------- screenshots ----------
 const browser = await chromium.launch(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {});
 async function session(opts = {}) {
@@ -322,6 +331,24 @@ await page.waitForTimeout(400);
 await shot(page, 'templates');
 await page.keyboard.press('Escape');
 await ctx.close();
+
+// 8b. restricted document: share dialog with the access log
+const r = await session();
+await r.page.evaluate((ids) => localStorage.setItem('folio.tree.expanded', JSON.stringify(ids)), [design, experiments, runbooks, people]);
+await open(r.page, comp, 'read');
+await r.page.getByTestId('restricted-badge').click();
+await r.page.getByTestId('show-audit').click();
+await r.page.waitForSelector('[data-testid=audit-log] li');
+await r.page.waitForTimeout(300);
+await shot(r.page, 'restricted');
+await r.page.keyboard.press('Escape');
+
+// 8c. where the files are stored
+await r.page.goto(`${BASE}/workspace/${ws}`);
+await r.page.getByTestId('storage-card').scrollIntoViewIfNeeded();
+await r.page.waitForTimeout(300);
+await r.page.getByTestId('storage-card').screenshot({ path: path.join(OUT, 'storage.png') });
+await r.ctx.close();
 
 // 9. dark mode
 const dark = await session({ colorScheme: 'dark' });

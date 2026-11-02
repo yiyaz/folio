@@ -4,7 +4,8 @@ import type { Config } from './config.js';
 import type { Storage } from './storage/index.js';
 import type { Mailer } from './mail.js';
 import type { EventBus } from './realtime.js';
-import type { SecretBox } from './crypto.js';
+import type { SecretBox } from './crypto/tokens.js';
+import type { KeyProvider } from './crypto/keys.js';
 
 export interface AppContext {
   cfg: Config;
@@ -13,6 +14,7 @@ export interface AppContext {
   mailer: Mailer;
   bus: EventBus;
   secrets: SecretBox;
+  keys: KeyProvider;
   log: FastifyBaseLogger;
 }
 

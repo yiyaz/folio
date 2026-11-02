@@ -353,7 +353,7 @@ function DocEditor({ doc }: { doc: Doc }) {
     const titles = { summarize: 'Summary', explain: 'Explanation', docs: 'Generated documentation', improve: 'Improved text' };
     setAi({ title: titles[action], text: null });
     try {
-      const r = await post<{ text: string }>('/api/ai', { action, text });
+      const r = await post<{ text: string }>('/api/ai', { action, text, documentId: doc.id });
       setAi({ title: titles[action], text: r.text });
     } catch (e) {
       setAi(null);
@@ -386,10 +386,12 @@ function DocEditor({ doc }: { doc: Doc }) {
         { id: 'doc-comments', label: 'Show comments', run: () => setPanel('comments') },
         { id: 'doc-export', label: 'Export this document (.md)', run: () => (window.location.href = `/api/documents/${doc.id}/export`) },
         ...(canEdit ? [{ id: 'doc-trash', label: 'Move this document to trash', run: trash }] : []),
-        ...(config?.ai ? (['summarize', 'explain', 'docs', 'improve'] as const).map((a) => ({ id: `ai-${a}`, label: `AI: ${a}`, run: () => runAi(a) })) : []),
+        ...(config?.ai && !doc.restricted
+          ? (['summarize', 'explain', 'docs', 'improve'] as const).map((a) => ({ id: `ai-${a}`, label: `AI: ${a}`, run: () => runAi(a) }))
+          : []),
       ]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [register, doc.id, canEdit, config?.ai],
+    [register, doc.id, canEdit, config?.ai, doc.restricted],
   );
 
   const hooks = useMemo(
@@ -533,7 +535,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                   Download .md
                 </a>
                 <button onClick={() => (close(), window.print())}>Print / PDF</button>
-                {config?.ai && (
+                {config?.ai && !doc.restricted && (
                   <>
                     <div className="menu-label small">AI assist {selection ? '(selection)' : '(document)'}</div>
                     <button onClick={() => (close(), runAi('summarize'))}>Summarize</button>
@@ -554,6 +556,16 @@ function DocEditor({ doc }: { doc: Doc }) {
         <div className="doc-meta small muted">
           {doc.updatedByUser ? `Edited by ${doc.updatedByUser.displayName}` : ''} {timeAgo(doc.updatedAt)} · {doc.role}
           {doc.sharedOnly ? ' (shared with you)' : ''}
+          {doc.restricted && (
+            <button
+              className="restricted-badge"
+              onClick={() => setShare({})}
+              title="Only listed people can open this document; encrypted at rest"
+              data-testid="restricted-badge"
+            >
+              🔒 Restricted
+            </button>
+          )}
         </div>
       </div>
 
@@ -733,7 +745,15 @@ function DocEditor({ doc }: { doc: Doc }) {
         </Modal>
       )}
       {share && (
-        <ShareDialog type="document" id={doc.id} name={doc.name} publicToken={doc.publicToken} initialUser={share.user} onClose={() => setShare(null)} />
+        <ShareDialog
+          type="document"
+          id={doc.id}
+          name={doc.name}
+          publicToken={doc.publicToken}
+          initialUser={share.user}
+          canEdit={canEdit}
+          onClose={() => setShare(null)}
+        />
       )}
       {ai && (
         <Modal title={ai.title} onClose={() => setAi(null)} wide>

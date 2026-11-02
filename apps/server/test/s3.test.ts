@@ -41,6 +41,24 @@ describe('S3 storage driver', () => {
     await expect(s.get('nope')).rejects.toThrow(/not found/);
   });
 
+  it('lists keys under a prefix (used by the library reconcile) and supports a key prefix', async (ctx) => {
+    if (!endpoint) return ctx.skip();
+    const { PrefixedStorage } = await import('../src/storage/index.js');
+    const raw = new S3Storage({
+      bucket: `folio-list-${Date.now()}`,
+      region: 'us-east-1',
+      endpoint,
+      accessKeyId: 'x',
+      secretAccessKey: 'y',
+      forcePathStyle: true,
+    });
+    const s = new PrefixedStorage(raw, 'folio/prod');
+    for (const k of ['library/WS (1)/a.md', 'library/WS (1)/sub/b.md', 'library/Other (2)/c.md', 'workspaces/x']) await s.put(k, 'x');
+    expect(await s.list('library/WS (1)/')).toEqual(['library/WS (1)/a.md', 'library/WS (1)/sub/b.md']);
+    expect(await raw.list('folio/prod/library/Other')).toEqual(['folio/prod/library/Other (2)/c.md']);
+    expect(s.locate('library/')).toMatch(/^s3:\/\/folio-list-\d+\/folio\/prod\/library\/$/);
+  });
+
   describe('full app on S3', () => {
     let env: TestEnv | null = null;
     beforeAll(async () => {

@@ -13,3 +13,8 @@ Check the rollout:
 NOTE: the bundled PostgreSQL/MinIO are single-instance and meant for evaluation or small teams.
 Use managed services for production.
 {{- end }}
+{{- if and (not .Values.existingSecret) (not .Values.secrets.folioKeys) (eq .Values.keys.provider "local") }}
+
+WARNING: secrets.folioKeys is empty, so restricted documents are encrypted with a key derived from
+APP_SECRET. Set secrets.folioKeys (node dist/admin-cli.js keys:generate) and back it up.
+{{- end }}

@@ -7,7 +7,7 @@ import { Client, createDoc, createTestEnv, personalWorkspace, signup, type TestE
 import { createEmbedFetcher } from '../src/routes/embeds.js';
 import { loadConfig } from '../src/config.js';
 import { FsStorage } from '../src/storage/fs.js';
-import { SecretBox } from '../src/crypto.js';
+import { SecretBox } from '../src/crypto/tokens.js';
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, {

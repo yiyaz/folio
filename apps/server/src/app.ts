@@ -14,7 +14,7 @@ import { createPool } from './db.js';
 import { createStorage, type Storage } from './storage/index.js';
 import { createMailer, type Mailer } from './mail.js';
 import { EventBus, registerRealtime } from './realtime.js';
-import { SecretBox } from './crypto.js';
+import { SecretBox } from './crypto/tokens.js';
 import { HttpError } from './errors.js';
 import { NotFoundInStorage } from './storage/index.js';
 import { registerAuth } from './auth/plugin.js';
@@ -29,11 +29,14 @@ import { registerAiRoutes } from './routes/ai.js';
 import { registerMetrics } from './metrics.js';
 import { migrate } from './migrate.js';
 import { runMaintenance } from './services/maintenance.js';
+import { createKeyProvider, KeyError, type KeyProvider } from './crypto/keys.js';
+import { reconcileAllLibraries } from './services/library.js';
 
 export interface BuildOptions {
   storage?: Storage;
   mailer?: Mailer;
   fetchImpl?: typeof fetch;
+  keys?: KeyProvider;
   runMigrations?: boolean;
   logger?: boolean | object;
 }
@@ -64,13 +67,17 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
     mailer: opts.mailer ?? createMailer(cfg, app.log),
     bus,
     secrets: new SecretBox(cfg.APP_SECRET),
+    keys: opts.keys ?? createKeyProvider(cfg),
     log: app.log,
   };
   app.decorate('ctx', ctx);
+  app.log.info({ storage: ctx.storage.locate(''), library: cfg.LIBRARY_ENABLED, keys: ctx.keys.describe() }, 'storage and key configuration');
 
   const maintenance = setInterval(() => {
     runMaintenance(db)
       .then((r) => r && app.log.info({ maintenance: r }, 'maintenance completed'))
+      .then(() => reconcileAllLibraries(ctx))
+      .then((n) => n && app.log.info({ workspaces: n }, 'library reconciled'))
       .catch((err) => app.log.warn({ err }, 'maintenance failed'));
   }, cfg.MAINTENANCE_INTERVAL_MINUTES * 60_000);
   maintenance.unref();
@@ -120,6 +127,11 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
     }
     if (err instanceof HttpError) {
       return reply.code(err.status).send({ error: err.code, message: err.message, details: err.details });
+    }
+    if (err instanceof KeyError) {
+      // a decryption/integrity failure: never leak details, but make it loud in the logs
+      req.log.error({ err }, 'encrypted content could not be decrypted or failed its integrity check');
+      return reply.code(500).send({ error: 'integrity', message: 'This content could not be decrypted' });
     }
     if (err instanceof NotFoundInStorage) {
       req.log.error({ err }, 'blob missing from storage');

@@ -35,7 +35,8 @@ describe('crash-safe storage', () => {
     await db.end();
     return new Set(r.rows.map((x) => x.storage_key));
   }
-  const storedBlobs = () => listFiles(env.cfg.STORAGE_FS_ROOT).filter((f) => f.endsWith('.md'));
+  // the version store only; library/ holds readable copies and is checked separately
+  const storedBlobs = () => listFiles(env.cfg.STORAGE_FS_ROOT).filter((f) => f.includes('/blobs/'));
 
   it('never overwrites content in place and leaves no orphaned blobs', async () => {
     const d = await createDoc(alice, ws, 'Immutable', 'v1');

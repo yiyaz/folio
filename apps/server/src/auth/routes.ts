@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { hash, verify } from '@node-rs/argon2';
 import { one, tx } from '../db.js';
-import { randomToken, sha256 } from '../crypto.js';
+import { randomToken, sha256 } from '../crypto/tokens.js';
 import { badRequest, conflict, HttpError, unauthorized } from '../errors.js';
 import { SESSION_COOKIE, requireUser } from './plugin.js';
 import { getSignupSettings } from './settings.js';

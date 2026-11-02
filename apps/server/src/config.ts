@@ -18,6 +18,10 @@ const schema = z.object({
 
   STORAGE_DRIVER: z.enum(['fs', 's3']).default('fs'),
   STORAGE_FS_ROOT: z.string().default('./.data/storage'),
+  /** Optional key prefix (e.g. "folio/prod") so several deployments can share one bucket. */
+  STORAGE_PREFIX: z.string().default(''),
+  /** Maintain the human-readable library/ mirror of every workspace. */
+  LIBRARY_ENABLED: bool(true),
   S3_BUCKET: z.string().default('folio'),
   S3_REGION: z.string().default('us-east-1'),
   S3_ENDPOINT: z.string().optional(),
@@ -63,6 +67,13 @@ const schema = z.object({
 
   PLANTUML_SERVER: z.string().default(''),
   PYODIDE_URL: z.string().default('https://cdn.jsdelivr.net/pyodide/v0.27.7/full/'),
+
+  /** Key-encryption keys for restricted documents: "local" (FOLIO_KEYS / derived) or "vault". */
+  KEY_PROVIDER: z.enum(['local', 'vault']).default('local'),
+  FOLIO_KEYS: z.string().default(''),
+  VAULT_ADDR: z.string().optional(),
+  VAULT_TOKEN: z.string().optional(),
+  VAULT_TRANSIT_KEY: z.string().default('folio'),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_MODEL: z.string().default('claude-opus-5-5'),

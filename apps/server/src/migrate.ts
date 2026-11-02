@@ -1,8 +1,14 @@
 import type pg from 'pg';
 import init001 from './migrations/001_init.js';
+import library002 from './migrations/002_library.js';
+import restricted003 from './migrations/003_restricted.js';
 
 /** Ordered list of migrations. Never edit a shipped migration; append a new one. */
-export const MIGRATIONS: { id: string; sql: string }[] = [{ id: '001_init', sql: init001 }];
+export const MIGRATIONS: { id: string; sql: string }[] = [
+  { id: '001_init', sql: init001 },
+  { id: '002_library', sql: library002 },
+  { id: '003_restricted', sql: restricted003 },
+];
 
 export async function migrate(pool: pg.Pool, log: (m: string) => void = () => {}): Promise<string[]> {
   const client = await pool.connect();

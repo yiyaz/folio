@@ -44,6 +44,9 @@ export interface DocAccess {
   deleted: boolean;
   /** true when access comes only from a direct share (not workspace membership). */
   sharedOnly: boolean;
+  restricted: boolean;
+  /** The user is the owner (creator) of a restricted document. */
+  isOwner: boolean;
 }
 
 const ANCESTORS_CTE = `anc AS (
@@ -55,29 +58,45 @@ const ANCESTORS_CTE = `anc AS (
 async function resolveAccess(db: Queryable, userId: string, kind: 'document' | 'folder', id: string): Promise<DocAccess | null> {
   const targetSql =
     kind === 'document'
-      ? `SELECT id, workspace_id, folder_id, deleted_at FROM documents WHERE id = $1`
-      : `SELECT id, workspace_id, parent_id AS folder_id, deleted_at FROM folders WHERE id = $1`;
-  const r = await one<{ workspace_id: string; folder_id: string | null; deleted_at: Date | null; owner: boolean; member: string | null; perms: string[] }>(
+      ? `SELECT id, workspace_id, folder_id, deleted_at, classification, created_by FROM documents WHERE id = $1`
+      : `SELECT id, workspace_id, parent_id AS folder_id, deleted_at, 'standard'::text AS classification, NULL::uuid AS created_by FROM folders WHERE id = $1`;
+  const r = await one<{
+    workspace_id: string;
+    folder_id: string | null;
+    deleted_at: Date | null;
+    classification: string;
+    created_by: string | null;
+    owner: boolean;
+    member: string | null;
+    direct: string[];
+    inherited: string[];
+  }>(
     db,
     `WITH RECURSIVE target AS (${targetSql}), ${ANCESTORS_CTE}
-     SELECT t.workspace_id, t.folder_id, t.deleted_at,
+     SELECT t.workspace_id, t.folder_id, t.deleted_at, t.classification, t.created_by,
        (SELECT w.owner_id = $2 FROM workspaces w WHERE w.id = t.workspace_id) AS owner,
        (SELECT role FROM workspace_members WHERE workspace_id = t.workspace_id AND user_id = $2) AS member,
-       ARRAY(SELECT role FROM permissions WHERE user_id = $2 AND (
-         (resource_type = $3 AND resource_id = t.id) OR
-         (resource_type = 'folder' AND resource_id IN (SELECT id FROM anc))
-       )) AS perms
+       ARRAY(SELECT role FROM permissions WHERE user_id = $2 AND resource_type = $3 AND resource_id = t.id) AS direct,
+       ARRAY(SELECT role FROM permissions WHERE user_id = $2 AND resource_type = 'folder' AND resource_id IN (SELECT id FROM anc)) AS inherited
      FROM target t`,
     [id, userId, kind],
   );
   if (!r) return null;
+  const base = { workspaceId: r.workspace_id, folderId: r.folder_id, deleted: !!r.deleted_at };
+  if (r.classification === 'restricted') {
+    // Deny by default: workspace roles (even owner/admin) and folder shares grant nothing.
+    // Only the document's owner and people it is shared with directly may open it.
+    const isOwner = r.created_by === userId;
+    return { ...base, role: isOwner ? 'owner' : maxRole(r.direct), sharedOnly: false, restricted: true, isOwner };
+  }
   const memberRole = r.owner ? 'owner' : r.member;
+  const shares = [...r.direct, ...r.inherited];
   return {
-    role: maxRole([memberRole, ...r.perms]),
-    workspaceId: r.workspace_id,
-    folderId: r.folder_id,
-    deleted: !!r.deleted_at,
-    sharedOnly: !memberRole && r.perms.length > 0,
+    ...base,
+    role: maxRole([memberRole, ...shares]),
+    sharedOnly: !memberRole && shares.length > 0,
+    restricted: false,
+    isOwner: false,
   };
 }
 
@@ -96,10 +115,20 @@ export const ACCESSIBLE_DOCS_CTE = `
   ),
   acc AS (
     SELECT d.id FROM documents d
-      WHERE d.workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = $1)
+      WHERE d.classification = 'standard' AND d.workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = $1)
     UNION SELECT resource_id FROM permissions WHERE user_id = $1 AND resource_type = 'document'
-    UNION SELECT d.id FROM documents d JOIN pf ON d.folder_id = pf.id
+    UNION SELECT d.id FROM documents d JOIN pf ON d.folder_id = pf.id WHERE d.classification = 'standard'
+    UNION SELECT d.id FROM documents d WHERE d.classification = 'restricted' AND d.created_by = $1
   )`;
+
+/**
+ * SQL predicate hiding restricted documents from workspace members who weren't given access.
+ * Use in listings that otherwise show every document of a workspace to its members.
+ * `alias` is the documents table alias; `userParam` the placeholder holding the user id.
+ */
+export const visibleDocSql = (alias: string, userParam: string) =>
+  `(${alias}.classification = 'standard' OR ${alias}.created_by = ${userParam} OR EXISTS (
+     SELECT 1 FROM permissions p WHERE p.resource_type = 'document' AND p.resource_id = ${alias}.id AND p.user_id = ${userParam}))`;
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function assertUuid(id: string) {

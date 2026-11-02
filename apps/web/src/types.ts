@@ -44,6 +44,7 @@ export interface TreeDoc {
   name: string;
   title: string;
   updatedAt: string;
+  restricted?: boolean;
 }
 export interface Tree {
   folders: TreeFolder[];
@@ -63,6 +64,8 @@ export interface Doc {
   workspaceName: string;
   folderPath: { id: string; name: string }[];
   publicToken: string | null;
+  restricted: boolean;
+  isOwner: boolean;
   updatedAt: string;
   createdAt: string;
   deletedAt: string | null;

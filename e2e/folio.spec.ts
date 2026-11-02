@@ -366,6 +366,79 @@ test('restricted documents: only listed people can open them, with an access log
   await expect(page.getByTestId('storage-card')).toContainText('1 restricted');
 });
 
+test('AI writes a document from workspace context; authorship shows AI text and human edits', async ({ page, browser }) => {
+  await login(page, 'alice');
+  await page.getByTestId('new-with-ai').click();
+  await page.getByTestId('ai-prompt').fill('release checklist');
+  await page.getByTestId('ai-ctx-pick').check();
+  await page.getByTestId('ai-pick-Architecture').check();
+  await page.getByTestId('ai-generate').click();
+  await expect(page.getByTestId('ai-output')).toContainText('This draft covers release checklist');
+  await expect(page.getByTestId('ai-context-report')).toContainText('Shared 1 document: Architecture');
+  await page.getByTestId('ai-accept').click();
+  await expect(page.getByTestId('doc-name')).toHaveValue('Release checklist');
+
+  // AI-written text is tinted; the legend explains it
+  await expect(page.locator('.cm-auth-ai').first()).toBeVisible();
+  await expect(page.locator('.authorship-legend')).toContainText('AI-written');
+
+  // a person's edit inside an AI sentence is marked as such ("key point." -> "key verified point.")
+  await page.locator('.cm-line', { hasText: 'Second key point' }).click();
+  await page.keyboard.press('End');
+  for (let i = 0; i < 'point.'.length; i++) await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type('verified ');
+  await waitSaved(page);
+  await page.keyboard.press('ControlOrMeta+Home'); // move the cursor away from the edited line
+  await expect(page.locator('.cm-auth-edited', { hasText: 'verified' })).toBeVisible();
+  await page.screenshot({ path: 'test-results/authorship-after-edit.png' });
+  // every AI-written line is tinted
+  for (const line of ['This draft covers', 'It draws on', 'First key point'])
+    await expect(page.locator('.cm-line', { hasText: line }).locator('.cm-auth-ai').first()).toBeVisible();
+  // a new sentence of one's own is a person's text, not an "edit" of AI text
+  await typeAtEnd(page, ' Signed off.');
+  await waitSaved(page);
+  await page.keyboard.press('ControlOrMeta+Home');
+  await expect(page.locator('.cm-auth-edited', { hasText: 'Signed off' })).toHaveCount(0);
+
+  // the read view shows the same attribution
+  await page.getByTestId('mode-read').click();
+  await expect(page.getByTestId('preview').locator('.auth-ai').first()).toBeVisible();
+  await expect(page.getByTestId('preview').locator('.auth-edited', { hasText: 'verified' })).toBeVisible();
+  await page.getByTestId('mode-live').click();
+
+  // insert AI text at the cursor; after a reload it is still attributed to the AI (verified by the server)
+  await typeAtEnd(page, '\n\nHuman paragraph.\n');
+  await page.getByTestId('tb-ai').click();
+  await page.getByTestId('ai-prompt').fill('rollback plan');
+  await page.getByTestId('ai-generate').click();
+  await expect(page.getByTestId('ai-accept')).toBeVisible();
+  await page.getByTestId('ai-accept').click();
+  await expect(page.locator('.cm-auth-ai', { hasText: 'rollback plan' }).first()).toBeVisible();
+  await waitSaved(page);
+  await page.reload();
+  await expect(page.locator('.cm-auth-ai', { hasText: 'rollback plan' }).first()).toBeVisible();
+  await expect(page.locator('.cm-auth-ai', { hasText: 'Human paragraph' })).toHaveCount(0);
+
+  // a coworker's edits, shown per person in "everyone" mode
+  const url = page.url();
+  const { ctx, page: bob } = await newContext(browser, 'bob');
+  await bob.goto(url);
+  await typeAtEnd(bob, '\nBob signed off.');
+  await waitSaved(bob);
+  await ctx.close();
+  await page.reload();
+  await page.getByTestId('authorship-mode').selectOption('all');
+  await expect(page.locator('.cm-auth-person', { hasText: 'Bob signed off' })).toHaveAttribute('title', /Bob/);
+
+  // the authors panel: shares and the provenance of the AI text
+  await page.getByTestId('panel-authors').click();
+  await expect(page.getByTestId('authors-panel')).toContainText('AI (fake-model)');
+  await expect(page.getByTestId('authors-panel')).toContainText('Bob');
+  await page.getByTestId('authors-panel').getByRole('button', { name: 'details' }).first().click();
+  await expect(page.getByTestId('generation-details')).toContainText('Architecture');
+  await page.getByTestId('authorship-mode').selectOption('ai');
+});
+
 test('admin can restrict sign-up to invitations', async ({ page, browser }) => {
   await login(page, 'alice');
   await page.goto('/admin');

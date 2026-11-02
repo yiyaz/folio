@@ -6,6 +6,7 @@ import type { Mailer } from './mail.js';
 import type { EventBus } from './realtime.js';
 import type { SecretBox } from './crypto/tokens.js';
 import type { KeyProvider } from './crypto/keys.js';
+import type { LlmProvider } from './ai/provider.js';
 
 export interface AppContext {
   cfg: Config;
@@ -15,6 +16,8 @@ export interface AppContext {
   bus: EventBus;
   secrets: SecretBox;
   keys: KeyProvider;
+  /** Language model for AI features, or null when AI is not configured. */
+  ai: LlmProvider | null;
   log: FastifyBaseLogger;
 }
 

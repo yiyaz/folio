@@ -95,6 +95,14 @@ export function SettingsPage() {
           </select>
         </label>
         <label className="field">
+          <span>Show authorship</span>
+          <select value={me.prefs.authorship ?? 'ai'} onChange={(e) => savePrefs({ authorship: e.target.value })}>
+            <option value="ai">Highlight AI-written text and people's edits to it</option>
+            <option value="all">Highlight every author (AI and coworkers)</option>
+            <option value="off">Don't highlight</option>
+          </select>
+        </label>
+        <label className="field">
           <span>Keybindings</span>
           <select value={me.prefs.keymap ?? 'default'} onChange={(e) => savePrefs({ keymap: e.target.value })} data-testid="keymap-select">
             <option value="default">Default</option>

@@ -9,7 +9,10 @@ import { realtime } from '../realtime';
 import { Editor, type EditorHandle } from '../editor/Editor';
 import { toggleWrap, setHeading, toggleLinePrefix, insertLink, insertBlock, insertCodeBlock, TABLE_SNIPPET } from '../editor/commands';
 import { Preview } from '../render/Preview';
-import { OutlinePanel, BacklinksPanel, CommentsPanel, HistoryPanel } from '../components/DocPanels';
+import { OutlinePanel, BacklinksPanel, CommentsPanel, HistoryPanel, AuthorsPanel } from '../components/DocPanels';
+import { AiDialog } from '../components/AiDialog';
+import { toSpans, type Authorship, type Span } from '@folio/markdown';
+import { emptyMeta, type AuthorMeta, type AuthorshipMode } from '../authorship';
 import { ShareDialog } from '../components/ShareDialog';
 import { Avatar, Menu, Modal, Spinner, useToast } from '../components/ui';
 import { useDialogs } from '../components/dialogs';
@@ -19,7 +22,7 @@ import { cx, errMsg, timeAgo, modKey } from '../util';
 import type { Comment, Doc, EditorMode, PublicUser } from '../types';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
-type Panel = 'outline' | 'backlinks' | 'comments' | 'history' | null;
+type Panel = 'outline' | 'backlinks' | 'comments' | 'history' | 'authors' | null;
 
 export function DocPage() {
   const { docId } = useParams<{ docId: string }>();
@@ -75,6 +78,34 @@ function DocEditor({ doc }: { doc: Doc }) {
   const [selection, setSelection] = useState<{ from: number; to: number; text: string } | null>(null);
   const [name, setName] = useState(doc.name);
   const [showResolved, setShowResolved] = useState(false);
+
+  // ---- authorship ----
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const initialSpans = useMemo(() => (doc.authorship ? toSpans(doc.authorship) : []), [doc.id]);
+  const [spans, setSpans] = useState<Span[]>(initialSpans);
+  const [meta, setMetaState] = useState<AuthorMeta>(doc.authorMeta ?? emptyMeta);
+  const metaRef = useRef(meta);
+  const setMeta = useCallback((m: AuthorMeta | ((p: AuthorMeta) => AuthorMeta)) => {
+    setMetaState((prev) => {
+      const next = typeof m === 'function' ? m(prev) : m;
+      metaRef.current = next;
+      return next;
+    });
+  }, []);
+  const refreshMeta = async () => {
+    const r = await get<AuthorMeta>(`/api/documents/${doc.id}/authorship`).catch(() => null);
+    if (r) setMeta({ people: r.people, generations: r.generations });
+  };
+  const [authorshipMode, setAuthorshipModeState] = useState<AuthorshipMode>(me?.prefs.authorship ?? 'ai');
+  const setAuthorshipMode = (m: AuthorshipMode) => {
+    setAuthorshipModeState(m);
+    if (me)
+      void patch('/api/users/me', { prefs: { authorship: m } })
+        .then((r) => setMe(r.user))
+        .catch(() => {});
+  };
+  const hasAi = spans.some((s) => s.author.kind === 'ai');
+  const [aiOpen, setAiOpen] = useState(false);
   const [ai, setAi] = useState<{ title: string; text: string | null } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlight = useRef<Promise<void> | null>(null);
@@ -96,11 +127,22 @@ function DocEditor({ doc }: { doc: Doc }) {
     setSaveState('saving');
     const p = (async () => {
       try {
-        const r = await put<{ version: number; title: string; mentionedWithoutAccess: { username: string }[] }>(`/api/documents/${doc.id}/content`, {
-          content: text,
-          baseVersion: versionRef.current,
-        });
+        const r = await put<{ version: number; title: string; mentionedWithoutAccess: { username: string }[]; authorship: Authorship }>(
+          `/api/documents/${doc.id}/content`,
+          {
+            content: text,
+            baseVersion: versionRef.current,
+            // AI-inserted text; the server only accepts it if it really came from our generations
+            aiClaims: editorRef.current?.aiClaims() ?? [],
+          },
+        );
         versionRef.current = r.version;
+        // the server's attribution is authoritative, unless we've typed more since this save
+        if (contentRef.current === text && r.authorship) {
+          editorRef.current?.setAuthorship(toSpans(r.authorship));
+          if (r.authorship.authors.some((a) => (a.kind === 'user' ? !metaRef.current.people[a.id] : !metaRef.current.generations[a.generationId])))
+            void refreshMeta();
+        }
         if (retries.current > 0) toast('Saved again — all changes are stored', 'success');
         retries.current = 0;
         setSaveState(contentRef.current === text ? 'saved' : 'dirty');
@@ -168,17 +210,18 @@ function DocEditor({ doc }: { doc: Doc }) {
     };
   }, [save]);
 
-  const replaceContent = (text: string, version: number) => {
+  const replaceContent = (text: string, version: number, authorship?: Authorship) => {
     versionRef.current = version;
     contentRef.current = text;
     setContent(text);
-    editorRef.current?.setContent(text);
+    editorRef.current?.setContent(text, authorship ? toSpans(authorship) : undefined);
     setSaveState('saved');
   };
 
   const reloadFromServer = async () => {
     const fresh = await get<Doc>(`/api/documents/${doc.id}`);
-    replaceContent(fresh.content, fresh.version);
+    replaceContent(fresh.content, fresh.version, fresh.authorship ?? undefined);
+    setMeta(fresh.authorMeta);
     setRemoteUpdate(null);
     qc.setQueryData(['doc', doc.id], fresh);
   };
@@ -190,7 +233,7 @@ function DocEditor({ doc }: { doc: Doc }) {
       if (m.type === 'presence' && m.docId === doc.id) setPresence(m.users);
       if (m.type === 'connected') realtime.join(doc.id);
       if (m.type === 'comments-changed' && m.docId === doc.id) void qc.invalidateQueries({ queryKey: ['comments', doc.id] });
-      if (m.type === 'doc-updated' && m.docId === doc.id && m.version > versionRef.current) {
+      if (m.type === 'doc-updated' && m.docId === doc.id && m.version > versionRef.current && !(m.by === me?.id && (inFlight.current || saveTimer.current))) {
         void qc.invalidateQueries({ queryKey: ['revisions', doc.id] });
         void qc.invalidateQueries({ queryKey: ['backlinks', doc.id] });
         const pristine = !saveTimer.current && !inFlight.current && (saveStateRef.current === 'saved' || !canEdit);
@@ -554,7 +597,23 @@ function DocEditor({ doc }: { doc: Doc }) {
           </Menu>
         </div>
         <div className="doc-meta small muted">
-          {doc.updatedByUser ? `Edited by ${doc.updatedByUser.displayName}` : ''} {timeAgo(doc.updatedAt)} · {doc.role}
+          <label className="authorship-toggle" title="Show who wrote which part of this document">
+            Authorship{' '}
+            <select value={authorshipMode} onChange={(e) => setAuthorshipMode(e.target.value as AuthorshipMode)} data-testid="authorship-mode">
+              <option value="off">hidden</option>
+              <option value="ai">AI</option>
+              <option value="all">everyone</option>
+            </select>
+          </label>
+          {authorshipMode !== 'off' && hasAi && (
+            <span className="authorship-legend" aria-hidden="true">
+              <span className="auth-ai">AI-written</span>{' '}
+              <span className="auth-edited" style={{ ['--auth-hue' as string]: 30 }}>
+                edited by a person
+              </span>
+            </span>
+          )}{' '}
+          · {doc.updatedByUser ? `Edited by ${doc.updatedByUser.displayName}` : ''} {timeAgo(doc.updatedAt)} · {doc.role}
           {doc.sharedOnly ? ' (shared with you)' : ''}
           {doc.restricted && (
             <button
@@ -625,6 +684,14 @@ function DocEditor({ doc }: { doc: Doc }) {
           <button onClick={pickFile} title="Upload image or file" aria-label="Upload file">
             📎
           </button>
+          {config?.ai && !doc.restricted && (
+            <>
+              <span className="sep" />
+              <button onClick={() => setAiOpen(true)} title="Write with AI at the cursor" aria-label="Write with AI" data-testid="tb-ai">
+                ✨ AI
+              </button>
+            </>
+          )}
           {canComment && (
             <>
               <span className="sep" />
@@ -649,6 +716,11 @@ function DocEditor({ doc }: { doc: Doc }) {
             <Editor
               ref={editorRef}
               initialValue={doc.content}
+              initialAuthorship={initialSpans}
+              localAuthor={me ? { kind: 'user', id: me.id } : null}
+              authorshipMode={authorshipMode}
+              authorMeta={meta}
+              onAuthorshipChange={setSpans}
               mode={editorMode}
               readOnly={!canEdit}
               keymapMode={me?.prefs.keymap ?? 'default'}
@@ -666,13 +738,13 @@ function DocEditor({ doc }: { doc: Doc }) {
           </div>
           {showPreview && (
             <div className="pane-preview" ref={previewRef}>
-              <Preview source={content} names={names} onToggleTask={canEdit ? toggleTask : undefined} />
+              <Preview source={content} names={names} onToggleTask={canEdit ? toggleTask : undefined} authorship={{ spans, mode: authorshipMode, meta }} />
             </div>
           )}
         </div>
         <aside className="doc-side">
           <div className="side-tabs" role="tablist">
-            {(['outline', 'backlinks', 'comments', 'history'] as const).map((p) => (
+            {(['outline', 'backlinks', 'comments', 'history', 'authors'] as const).map((p) => (
               <button
                 key={p}
                 role="tab"
@@ -681,7 +753,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                 onClick={() => setPanel(panel === p ? null : p)}
                 data-testid={`panel-${p}`}
               >
-                {p === 'outline' ? '☰' : p === 'backlinks' ? '↩' : p === 'comments' ? '💬' : '🕘'}
+                {p === 'outline' ? '☰' : p === 'backlinks' ? '↩' : p === 'comments' ? '💬' : p === 'history' ? '🕘' : '👥'}
                 <span className="tab-label">{p}</span>
                 {p === 'comments' && openComments > 0 && <span className="count">{openComments}</span>}
               </button>
@@ -710,6 +782,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                 />
               )}
               {panel === 'history' && <HistoryPanel docId={doc.id} current={content} canRestore={canEdit} onRestored={reloadFromServer} />}
+              {panel === 'authors' && <AuthorsPanel spans={spans} meta={meta} mode={authorshipMode} setMode={setAuthorshipMode} />}
             </div>
           )}
         </aside>
@@ -722,8 +795,8 @@ function DocEditor({ doc }: { doc: Doc }) {
             <button
               className="btn"
               onClick={() => {
-                replaceContent(conflict.content, conflict.version);
                 setConflict(null);
+                void reloadFromServer();
               }}
               data-testid="conflict-theirs"
             >
@@ -743,6 +816,34 @@ function DocEditor({ doc }: { doc: Doc }) {
             </button>
           </div>
         </Modal>
+      )}
+      {aiOpen && (
+        <AiDialog
+          workspaceId={doc.workspaceId}
+          mode="insert"
+          documentId={doc.id}
+          documentName={doc.name}
+          folderId={doc.folderId}
+          onClose={() => setAiOpen(false)}
+          onInsert={(text, author) => {
+            if (author.kind !== 'ai') return;
+            setMeta((m) => ({
+              ...m,
+              generations: {
+                ...m.generations,
+                [author.generationId]: {
+                  id: author.generationId,
+                  model: author.model,
+                  prompt: '',
+                  context: [],
+                  requestedBy: me?.id ?? null,
+                  createdAt: new Date().toISOString(),
+                },
+              },
+            }));
+            editorRef.current?.insertAi(text, { ...author, requestedBy: me?.id ?? '' });
+          }}
+        />
       )}
       {share && (
         <ShareDialog

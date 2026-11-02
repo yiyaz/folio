@@ -38,6 +38,8 @@ export default defineConfig({
       PUBLIC_URL: `http://localhost:${PORT}`,
       LOG_LEVEL: 'warn',
       APP_SECRET: 'e2e-secret-e2e-secret-e2e-secret',
+      // deterministic stand-in for the language model
+      AI_PROVIDER: 'fake',
     },
   },
 });

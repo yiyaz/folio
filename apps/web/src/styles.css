@@ -1678,3 +1678,149 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- authorship ----
+   AI-written text: a faint violet wash. A person's edits inside AI-written sentences: a thin
+   underline in that person's colour. "Everyone" mode: each person's text gets a faint underline. */
+:root {
+  --auth-ai-bg: hsl(262 90% 60% / 0.09);
+  --auth-ai-line: hsl(262 70% 60% / 0.55);
+}
+:root[data-theme='dark'] {
+  --auth-ai-bg: hsl(262 90% 70% / 0.14);
+  --auth-ai-line: hsl(262 70% 72% / 0.6);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --auth-ai-bg: hsl(262 90% 70% / 0.14);
+    --auth-ai-line: hsl(262 70% 72% / 0.6);
+  }
+}
+.cm-auth-ai,
+.auth-ai {
+  background: var(--auth-ai-bg);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.cm-auth-edited,
+.auth-edited {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  text-decoration-color: hsl(var(--auth-hue, 30) 75% 45%);
+}
+.cm-auth-person,
+.auth-person {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: hsl(var(--auth-hue, 30) 70% 55% / 0.6);
+}
+.authorship-toggle {
+  margin-right: 6px;
+}
+.authorship-toggle select {
+  padding: 0 4px;
+  font-size: 0.8rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.authorship-legend {
+  margin-left: 4px;
+}
+.authorship-legend span {
+  padding: 0 3px;
+}
+.authors-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 6px 0;
+}
+.authors-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+.authors-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.gen-details {
+  width: 100%;
+  padding: 6px 0 2px 18px;
+}
+.gen-details blockquote {
+  margin: 4px 0;
+}
+.ai-dialog textarea {
+  width: 100%;
+  resize: vertical;
+}
+.ai-context {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  margin: 8px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.ai-context legend {
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0 4px;
+}
+.ai-context .check {
+  margin: 2px 0;
+}
+.ai-context p {
+  width: 100%;
+  margin: 4px 0;
+}
+.ai-pick {
+  width: 100%;
+}
+.ai-pick > input {
+  width: 100%;
+}
+.ai-pick li .check {
+  margin: 2px 0;
+}
+.ai-pick li.disabled {
+  color: var(--muted);
+}
+.ai-pick ul {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.ai-omitted {
+  color: var(--danger);
+}
+.ai-output {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 16px;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: var(--auth-ai-bg);
+}
+.public-legend {
+  margin-left: 8px;
+}

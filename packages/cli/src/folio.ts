@@ -14,6 +14,11 @@ Usage:
                                                update their document, others are created
   folio search <query> [--workspace <id>]      Full-text search
   folio cat <document-id>                      Print a document's Markdown
+  folio generate <workspace-id> "<prompt>" [--name <doc name>] [--folder <id>]
+               [--context <doc-id,doc-id>] [--context-folder <id>] [--context-workspace]
+               [--append <doc-id>] [--print]
+                                               Write a document with the workspace's AI, grounded in
+                                               the given documents; --print only prints the text
   folio new <workspace-id> <name> [--file f] [--folder <id>]
                                                Create a document from a file or stdin (e.g. CI reports)
 
@@ -99,6 +104,29 @@ export async function main(argv: string[]) {
         folderId: typeof flags.folder === 'string' ? flags.folder : null,
       });
       return console.log(`${d.id}\t${d.name}`);
+    }
+    case 'generate': {
+      const [ws, ...promptParts] = args;
+      const prompt = promptParts.join(' ').trim();
+      if (!ws || !prompt) throw new Error('usage: folio generate <workspace-id> "<prompt>" [options]');
+      const str = (k: string) => (typeof flags[k] === 'string' ? (flags[k] as string) : undefined);
+      const context = {
+        documentIds: str('context')
+          ?.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        folderId: str('context-folder'),
+        workspace: flags['context-workspace'] === true || undefined,
+      };
+      const target = flags.print
+        ? { type: 'text' }
+        : str('append')
+          ? { type: 'append', documentId: str('append') }
+          : { type: 'new', name: str('name'), folderId: str('folder') ?? null };
+      const r = await api.json('POST', '/api/ai/generate', { prompt, workspaceId: ws, context, target });
+      for (const o of r.context.omitted) console.error(`note: ${o.name ?? 'a document'} was not shared with the AI (${o.reason})`);
+      if (flags.print) return process.stdout.write(r.text);
+      return console.log(`${r.document.id}\t${r.document.name}\t(${r.context.used.length} context document(s), model ${r.model})`);
     }
     default:
       throw new Error(`unknown command "${cmd}". Run "folio help".`);

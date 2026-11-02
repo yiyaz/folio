@@ -65,7 +65,7 @@ jobs:
     permissions: { contents: read, packages: write }
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - run: helm lint deploy/helm/folio --set secrets.databaseUrl=postgres://u:p@db/folio
       - run: helm template t deploy/helm/folio --set postgresql.enabled=true --set storage.driver=fs --set replicaCount=1 --set autoscaling.enabled=false > /dev/null
       - uses: docker/setup-buildx-action@v3

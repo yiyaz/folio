@@ -44,7 +44,11 @@ test('write a document with live formatting and read mode', async ({ page }) => 
   await page.getByTestId('tb-bold').click();
   await waitSaved(page);
 
-  await page.getByTestId('mode-read').click();
+  // the view mode is a saved preference: wait until it is stored, since the test reloads below
+  await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith('/api/users/me') && r.request().method() === 'PATCH' && r.ok()),
+    page.getByTestId('mode-read').click(),
+  ]);
   await expect(page.getByTestId('preview').locator('h1')).toHaveText('Design');
   await expect(page.getByTestId('preview').locator('strong').first()).toHaveText('fast');
   await expect(page.getByTestId('preview').locator('a.tag')).toHaveText('#product');

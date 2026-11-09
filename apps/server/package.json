@@ -30,7 +30,7 @@
     "fastify": "^5.12.7",
     "jszip": "^3.10.2",
     "nodemailer": "^10.3.1",
-    "openid-client": "^5.7.1",
+    "openid-client": "^6.8.9",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "prom-client": "^15.1.3",
